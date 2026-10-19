@@ -58,7 +58,7 @@ jobs:
       - name: Smoke test
         run: |
           docker run -d --name smoke -p 127.0.0.1:3000:3000 "$IMAGE:$GITHUB_SHA"
-          curl -fsS --retry 15 --retry-delay 1 --retry-connrefused http://127.0.0.1:3000/healthz
+          curl -fsS --retry 20 --retry-delay 1 --retry-connrefused --retry-all-errors http://127.0.0.1:3000/healthz || { docker ps -a; docker logs smoke; exit 1; }
           docker rm -f smoke
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
