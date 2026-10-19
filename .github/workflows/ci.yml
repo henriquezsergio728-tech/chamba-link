@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -42,3 +42,33 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm --filter @chamba/api exec drizzle-kit migrate
       - run: pnpm test
+
+  image:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/henriquezsergio728-tech/chamba-link-api
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build (native arm64)
+        run: docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE:$GITHUB_SHA" .
+      - name: Smoke test
+        run: |
+          docker run -d --name smoke -p 127.0.0.1:3000:3000 "$IMAGE:$GITHUB_SHA"
+          curl -fsS --retry 20 --retry-delay 1 --retry-connrefused --retry-all-errors http://127.0.0.1:3000/healthz || { docker ps -a; docker logs smoke; exit 1; }
+          docker rm -f smoke
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: Push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:latest"
