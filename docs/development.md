@@ -86,3 +86,12 @@ Commits follow the Conventional Commits format, `<type>(<scope>): <summary>`, wi
 | `test` | `db` |
 | `ci` | none |
 | `chore` | none |
+| `docs` | none |
+
+Dependabot commits use the `ci` prefix (`.github/dependabot.yml`).
+
+## Repository conventions
+
+- `.gitattributes` sets `* text=auto eol=lf`, so text files are stored and checked out with LF line endings.
+- `CLAUDE.md` holds the working agreements for Claude Code sessions in this repository.
+- The repository is licensed under MIT; see [`LICENSE`](../LICENSE).

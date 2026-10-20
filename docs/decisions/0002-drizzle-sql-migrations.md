@@ -13,5 +13,5 @@ Use Drizzle. Generate SQL migrations with `drizzle-kit generate`, commit them un
 - Every schema change is a reviewed SQL file in the repository.
 - SQL that the schema cannot express, such as the exclusion constraint in [0003](0003-exclusion-constraint-double-booking.md), is added as a custom migration and is not reflected in `schema.ts` or the snapshots.
 - Production does not need drizzle-kit: the image runs `node dist/migrate.js` with `drizzle-orm` only.
-- CI applies migrations with `drizzle-kit migrate`; production applies them with the programmatic migrator. Both read the same `api/drizzle/` folder.
+- The CI `test` job applies migrations with `drizzle-kit migrate`. The CI `image` job and production apply them with the programmatic migrator from the image. All read the same `api/drizzle/` folder.
 - `drizzle-orm` and `drizzle-kit` are pinned to the exact version `1.0.0-rc.4`, a release candidate.
