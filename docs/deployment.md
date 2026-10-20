@@ -177,4 +177,4 @@ Run the `docker compose` commands from `/opt/chambalink`. Add `-f` to follow.
 
 `/etc/docker/daemon.json` sets the `json-file` log driver with `max-size` `10m` and `max-file` `3`, so each container keeps at most three 10 MB log files.
 
-The API logs the client address as seen by Fastify. Fastify's `trustProxy` is not enabled, so it does not read the `X-Forwarded-For` header that nginx sets.
+The API logs the client address as seen by Fastify. Fastify trusts `X-Forwarded-For` from loopback and private-network peers (`trustProxy: "loopback,uniquelocal"`), so `request.ip` comes from the header nginx sets when the peer is in those ranges.
