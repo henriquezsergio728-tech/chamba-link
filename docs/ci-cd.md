@@ -46,9 +46,18 @@ Runs after `test` succeeds (`needs: test`), on `ubuntu-24.04-arm`, a native arm6
 | Step | Pull request | Push to `main` |
 | --- | --- | --- |
 | Build: `docker build` tagged `$GITHUB_SHA`, labelled `org.opencontainers.image.revision=$GITHUB_SHA` | Yes | Yes |
+| Migrate: shipped migrator against a fresh Postgres, run twice | Yes | Yes |
 | Smoke test | Yes | Yes |
 | Log in to `ghcr.io` with `GITHUB_TOKEN` | No | Yes |
 | Push `:<sha>` and `:latest` | No | Yes |
+
+The migrate step tests the migrator inside the built image:
+
+1. Creates a Docker network `ci` and starts a `postgres:16` container `pg` on it, with user, password and database `chamba`.
+2. Polls `pg_isready` once per second, up to 60 times, then runs `pg_isready` once more so the step fails if Postgres is not ready.
+3. Runs `node dist/migrate.js` from the built image twice, with `DATABASE_URL=postgres://chamba:chamba@pg:5432/chamba`. The second run checks that applying migrations to an already migrated database succeeds.
+4. Queries `pg_constraint` and fails unless both `bookings_no_provider_overlap` and `bookings_during_bounded` exist.
+5. Removes the `pg` container.
 
 The smoke test runs the image with port `127.0.0.1:3000:3000` and polls `GET /healthz` with `curl -fsS`, retrying up to 20 times at 1 s intervals on any error, including connection refused and connection reset. On failure it prints `docker ps -a` and the container logs, then fails the job. The container runs without `DATABASE_URL`, which works because the API does not connect to the database.
 
@@ -71,6 +80,10 @@ The image contains `dist/` and `drizzle/`, so it can run the migrator with `node
 The SHA tag identifies one build. `latest` moves on every push to `main`. Production selects an image by SHA through `API_TAG`.
 
 Publishing an image does not deploy it. Deployment is manual; see [Deployment](deployment.md).
+
+## Dependabot
+
+[`.github/dependabot.yml`](../.github/dependabot.yml) checks the `github-actions` ecosystem in `/` weekly and opens pull requests with the commit-message prefix `ci`. It does not cover npm dependencies or Docker base images.
 
 ## Branch protection
 

@@ -12,6 +12,6 @@ Build the image in CI on the native arm64 runner `ubuntu-24.04-arm`, smoke-test 
 
 - The build needs no emulation or cross-compilation.
 - The published image is `linux/arm64` only.
-- Pull requests build and smoke-test the image without pushing it.
+- Pull requests build, migrate-test and smoke-test the image without pushing it. See [CI/CD](../ci-cd.md#job-image).
 - Each SHA tag identifies one build. `latest` moves on every push to `main`.
 - Production selects an image by SHA through `API_TAG`.

@@ -10,7 +10,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 - A Postgres 16 schema, managed with Drizzle, with `accounts` and `bookings` tables.
 - A database-level guarantee that a provider cannot hold two overlapping non-cancelled bookings, covered by integration tests.
 - A container image for the API that also ships a programmatic migrator.
-- A GitHub Actions pipeline that typechecks, migrates and tests on every pull request, builds and smoke-tests an arm64 image, and publishes it to GitHub Container Registry from `main`.
+- A GitHub Actions pipeline that typechecks, migrates and tests on every pull request, builds an arm64 image, runs its migrator against a fresh Postgres, smoke-tests it, and publishes it to GitHub Container Registry from `main`.
 - A production Compose overlay and an nginx reverse-proxy config for a single VM.
 
 ## Repository layout
@@ -27,12 +27,18 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   ├── test/                 Vitest tests
 │   └── drizzle.config.ts     drizzle-kit configuration
 ├── deploy/nginx/             nginx site config for the production VM
-├── .github/workflows/ci.yml  CI pipeline
+├── docs/                     Project documentation and ADRs
+├── .github/
+│   ├── workflows/ci.yml      CI pipeline
+│   └── dependabot.yml        Weekly GitHub Actions updates
 ├── compose.yaml              Postgres for development and production
 ├── compose.prod.yaml         Production overlay that adds the API container
 ├── Dockerfile                API image
 ├── .env.example              Environment variable template
+├── .gitattributes            LF line endings for text files
 ├── .nvmrc                    Node major version
+├── CLAUDE.md                 Working agreements for Claude Code
+├── LICENSE                   MIT license
 ├── package.json              Workspace root scripts and pnpm pin
 └── pnpm-workspace.yaml       Workspace packages and build-script approvals
 ```
