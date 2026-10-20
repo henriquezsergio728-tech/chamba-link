@@ -98,3 +98,7 @@ The booking tests need the database to be running and migrated.
   - [0003 Prevent double booking with an exclusion constraint](docs/decisions/0003-exclusion-constraint-double-booking.md)
   - [0004 Native arm64 image build in CI](docs/decisions/0004-native-arm64-image-build.md)
   - [0005 Compose overlay with host nginx in production](docs/decisions/0005-compose-overlay-host-nginx.md)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
