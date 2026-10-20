@@ -60,4 +60,10 @@ test('a cancelled booking does not block the slot', async () => {
 test('rejects empty and unbounded ranges', async () => {
   expect(await tryInsert('A', 'empty')).toBe('23514');
   expect(await tryInsert('A', '[2026-11-06 09:00+00,)')).toBe('23514');
+  expect(await tryInsert('A', '(,2026-11-06 10:00+00)')).toBe('23514');
+});
+
+test('a confirmed booking blocks an overlapping pending one', async () => {
+  expect(await tryInsert('A', '[2026-11-07 09:00+00,2026-11-07 10:00+00)', 'confirmed')).toBeNull();
+  expect(await tryInsert('A', '[2026-11-07 09:30+00,2026-11-07 10:30+00)')).toBe('23P01');
 });

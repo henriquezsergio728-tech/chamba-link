@@ -79,8 +79,20 @@ These constraints exist only in the migration SQL. They are not declared in `sch
 | New booking over a `cancelled` booking's slot | Accepted |
 | `empty` range | `23514` |
 | Range with no upper bound | `23514` |
+| Range with no lower bound | `23514` |
+| Overlapping `pending` booking over a `confirmed` one | `23P01` |
 
-The tests use a single connection. They do not exercise concurrent writers.
+[`api/test/booking-concurrency.test.ts`](../api/test/booking-concurrency.test.ts) exercises concurrent writers on separate pooled connections that commit. Each test creates its own accounts, and every row it creates is deleted in `afterAll`. It covers:
+
+| Case | Expected result |
+| --- | --- |
+| Connection A holds an open transaction with a booking; B inserts an overlapping booking | B waits while A is open, then fails with `23P01` when A commits |
+| Same, but A rolls back | B waits while A is open, then succeeds |
+| 20 overlapping inserts for one provider sent at once on 20 distinct connections | Exactly one succeeds, 19 fail with `23P01` or `40P01`, and one row remains |
+
+When concurrent inserters each see the other's uncommitted row, they wait on each other. Postgres breaks that cycle after `deadlock_timeout` and fails the waiter with `40P01` (`deadlock_detected`) instead of `23P01`.
+
+With `bookings_no_provider_overlap` dropped, the three concurrency tests fail.
 
 ## Migrations
 

@@ -21,4 +21,4 @@ A `CHECK` constraint rejects empty and unbounded ranges. See [Data model](../dat
 - Half-open ranges (`[start,end)`) allow back-to-back bookings.
 - Cancelled bookings do not block their slot.
 - The migration requires the `btree_gist` extension.
-- The constraint is covered by `api/test/booking-overlap.test.ts`, which runs against a real Postgres.
+- The constraint is covered by `api/test/booking-overlap.test.ts` and `api/test/booking-concurrency.test.ts`, which run against a real Postgres. The concurrency tests show that concurrent overlapping inserts leave exactly one row, and that the rejected inserts fail with `23P01` or `40P01` (`deadlock_detected`).
