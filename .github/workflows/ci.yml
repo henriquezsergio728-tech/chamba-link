@@ -55,6 +55,15 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build (native arm64)
         run: docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE:$GITHUB_SHA" .
+      - name: Migrate (shipped migrator, fresh Postgres, run twice)
+        run: |
+          docker network create ci
+          docker run -d --name pg --network ci -e POSTGRES_USER=chamba -e POSTGRES_PASSWORD=chamba -e POSTGRES_DB=chamba postgres:16
+          for _ in $(seq 60); do docker exec pg pg_isready -h 127.0.0.1 -U chamba -d chamba && break; sleep 1; done
+          docker exec pg pg_isready -h 127.0.0.1 -U chamba -d chamba
+          for _ in 1 2; do docker run --rm --network ci -e DATABASE_URL=postgres://chamba:chamba@pg:5432/chamba "$IMAGE:$GITHUB_SHA" node dist/migrate.js; done
+          test "$(docker exec pg psql -U chamba -d chamba -tAc "select count(*) from pg_constraint where conname in ('bookings_no_provider_overlap','bookings_during_bounded')")" = 2
+          docker rm -f pg
       - name: Smoke test
         run: |
           docker run -d --name smoke -p 127.0.0.1:3000:3000 "$IMAGE:$GITHUB_SHA"
