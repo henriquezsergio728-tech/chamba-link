@@ -54,7 +54,7 @@ The production VM has no IPv6 address. Cloudflare serves clients over IPv4 and I
 - `ssl_certificate /etc/ssl/chambalink/origin.pem`, `ssl_certificate_key /etc/ssl/chambalink/origin.key`, `ssl_protocols TLSv1.2 TLSv1.3`.
 - One `location /` that proxies to `http://127.0.0.1:3000`.
 
-Port 80 is the `default_server`, so it answers plain HTTP for any `Host`. Port 443 has no other server block, so nginx uses this one for every TLS connection on it.
+Port 80 is the `default_server`, so it answers plain HTTP for any `Host`. The host firewall blocks port 80 from outside the VM, so it is reachable on loopback only. Port 443 has no other server block, so nginx uses this one for every TLS connection on it.
 
 The file starts with `include /opt/chambalink/deploy/nginx/cloudflare-real-ip.conf;`, an absolute path into the clone. That file lists Cloudflare's IPv4 and IPv6 ranges as `set_real_ip_from` entries and sets `real_ip_header CF-Connecting-IP`. See [Deployment](deployment.md#cloudflare-real-ip-ranges) for how it is regenerated.
 
@@ -63,19 +63,21 @@ The file starts with `include /opt/chambalink/deploy/nginx/cloudflare-real-ip.co
 | Boundary | What is trusted | Mechanism |
 | --- | --- | --- |
 | Client to Cloudflare | Cloudflare's edge certificate | Managed by Cloudflare |
+| Network to origin | TCP 443 only from Cloudflare's IPv4 ranges; port 80 not reachable from outside | Host iptables `INPUT` rules on the VM, not in the repo. See [Deployment](deployment.md#firewall). |
 | Cloudflare to nginx | The origin presents a certificate signed by Cloudflare Origin CA | SSL/TLS mode Full (strict) |
 | nginx visitor address | `CF-Connecting-IP`, only when the peer is in Cloudflare's ranges | `ngx_http_realip_module` with `cloudflare-real-ip.conf` |
 | Fastify client address | `X-Forwarded-For`, only when the peer is loopback or private | `trustProxy: "loopback,uniquelocal"` in `api/src/app.ts` |
 | Host to containers | Ports `3000` and `5432` bound to `127.0.0.1` | `compose.prod.yaml`, `compose.yaml` |
 
-The origin accepts direct connections on ports 80 and 443 from any address; they are not restricted to Cloudflare's ranges. A direct connection on 443 receives a certificate that only Cloudflare trusts.
+The host firewall accepts new TCP connections on 443 only from the 15 Cloudflare IPv4 ranges copied on 2026-10-22, and rejects them on 80 from outside the VM. It accepts port 22 from any address. A connection to 443 on the VM itself receives a certificate that only Cloudflare trusts.
 
 ## Network exposure
 
 | Port | Bound to | Process |
 | --- | --- | --- |
-| 80 | all interfaces (IPv4 and IPv6) | nginx on the host, plain HTTP |
-| 443 | all interfaces (IPv4 and IPv6) | nginx on the host, TLS |
+| 22 | not defined in the repo | SSH; the host firewall accepts it from any address |
+| 80 | all interfaces (IPv4 and IPv6); reachable on loopback only | nginx on the host, plain HTTP |
+| 443 | all interfaces (IPv4 and IPv6); reachable from outside only from Cloudflare's IPv4 ranges | nginx on the host, TLS |
 | 3000 | `127.0.0.1` | `api` container (`compose.prod.yaml`) |
 | 5432 | `127.0.0.1` | `db` container (`compose.yaml`) |
 

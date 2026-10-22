@@ -2,7 +2,7 @@
 
 Runbook for the production VM. Commands that start with `cd /opt/chambalink` or use `docker compose` run on the VM as the `ubuntu` user unless they use `sudo`. Commands marked as run from outside the VM run on any other machine.
 
-Production is a single host. The repository defines no backup for the `pgdata` volume. The origin accepts direct connections on ports 80 and 443 from any address; they are not restricted to Cloudflare's ranges.
+Production is a single host. The repository defines no backup for the `pgdata` volume. The host firewall rules that restrict port 443 to Cloudflare's IPv4 ranges exist only on the VM, not in the repository.
 
 ## Host
 
@@ -24,6 +24,7 @@ Production is a single host. The repository defines no backup for the `pgdata` v
 | `/etc/nginx/sites-enabled/` | root | Symlink to `/opt/chambalink/deploy/nginx/chambalink.conf`; the stock `default` site is removed |
 | `/etc/ssl/chambalink/origin.key` | `root`, mode `600` | TLS private key |
 | `/etc/ssl/chambalink/origin.pem` | `root` | Cloudflare Origin CA certificate |
+| `/etc/iptables/rules.v4` | root | Persisted host IPv4 firewall rules |
 | `/etc/docker/daemon.json` | root | Docker log rotation |
 | `/etc/cloud/cloud.cfg.d/99-hostname.cfg` | root | `preserve_hostname: true` |
 
@@ -83,7 +84,7 @@ The origin certificate:
 
 - covers `chambalink.online` and a wildcard, and expires on Oct 18 2041;
 - uses an RSA 2048 key generated on the VM with `openssl`; only the CSR was submitted to Cloudflare, so the private key has not left the VM;
-- is trusted only by Cloudflare, so a client connecting to the origin directly gets an untrusted-certificate error.
+- is trusted only by Cloudflare, so a client that reaches the origin directly gets an untrusted-certificate error unless it trusts Cloudflare Origin CA. From outside the VM, only Cloudflare's IPv4 ranges can reach port 443; see [Firewall](#firewall).
 
 Cloudflare sends no expiry notifications for Origin CA certificates. No renewal is configured on the VM. See [ADR 0006](decisions/0006-cloudflare-origin-ca-certificate.md).
 
@@ -252,17 +253,120 @@ The file is committed. nginx on the VM reads the copy in `/opt/chambalink` after
 
 ## Firewall
 
-The stock OCI Ubuntu image has an iptables `INPUT` chain that ends in a `REJECT` rule. Ports 80 and 443 stay blocked by it even when the VCN security list allows them. On the production VM, `ACCEPT` rules for TCP 80 and 443 are inserted above the `REJECT` rule and persisted with `netfilter-persistent save`. They were saved before Docker was installed, so Docker's chains are not part of the persisted rules.
+The stock OCI Ubuntu image has an iptables `INPUT` chain that ends in a `REJECT` rule. A port stays blocked by it even when the VCN security list allows it, unless an `ACCEPT` rule above the `REJECT` matches.
 
-Check the rule order:
+The host firewall rules exist only on the VM. The repository does not contain them. See [ADR 0007](decisions/0007-host-firewall-cloudflare-ranges.md).
+
+### Applied rules
+
+The IPv4 `INPUT` chain on the production VM, in order:
+
+| # | Rule |
+| --- | --- |
+| 1 | `ACCEPT` state `RELATED,ESTABLISHED` |
+| 2 | `ACCEPT` ICMP |
+| 3 | `ACCEPT` on `lo` |
+| 4 | `ACCEPT` TCP 22, state `NEW`, no source restriction |
+| 5-19 | `ACCEPT` TCP 443, state `NEW`, one rule per Cloudflare IPv4 range (`-s <range>`), 15 rules |
+| 20 | `REJECT` with `icmp-host-prohibited` |
+
+- There is no `ACCEPT` rule for port 80. nginx still listens on 80, and `curl -si http://127.0.0.1/healthz` on the VM returns `HTTP/1.1 200 OK`, but port 80 is unreachable from outside the VM.
+- The 15 ranges were copied from `https://www.cloudflare.com/ips-v4` on 2026-10-22 (UTC).
+- No ipset is used; the `ipset-persistent` package is not installed.
+- IPv6 rules were not changed. The VM has no IPv6 address.
+
+### Persistence
+
+The rules are persisted by editing `/etc/iptables/rules.v4`, not with `netfilter-persistent save`. The original stock rules were saved before Docker was installed, so Docker's chains are not part of the persisted rules. Running `sudo netfilter-persistent save` now that Docker is installed would also persist Docker's chains.
+
+### Procedure as executed
+
+This procedure has been executed once, starting from the earlier layout in which position 6 of the `INPUT` chain was the open 443 rule and a separate rule accepted port 80. The live rules were applied first and the file edited afterwards.
+
+Fetch the ranges:
 
 ```bash
-sudo iptables -L INPUT -n --line-numbers
+curl -fsS https://www.cloudflare.com/ips-v4 -o /tmp/cf4.txt && grep -c . /tmp/cf4.txt
 ```
 
-Expected: `ACCEPT` rules for `tcp dpt:80` and `tcp dpt:443` with lower line numbers than the `REJECT` rule.
+Expected output: `15`.
 
-Running `sudo netfilter-persistent save` now that Docker is installed would also persist Docker's chains.
+Insert one rule per range at position 6, then delete the open 443 and 80 rules:
+
+```bash
+while read -r n; do sudo iptables -I INPUT 6 -s "$n" -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT; done < /tmp/cf4.txt
+sudo iptables -D INPUT -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT
+sudo iptables -D INPUT -p tcp -m state --state NEW -m tcp --dport 80 -j ACCEPT
+```
+
+Rewrite `/etc/iptables/rules.v4` from a backup, replacing the two original `ACCEPT` lines for ports 80 and 443 with the 15 range lines:
+
+```bash
+sudo cp -a /etc/iptables/rules.v4 /etc/iptables/rules.v4.bak
+sudo awk -v list=/tmp/cf4.txt '$0=="-A INPUT -p tcp -m state --state NEW -m tcp --dport 80 -j ACCEPT"{next} $0=="-A INPUT -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT"{while((getline n<list)>0)print "-A INPUT -s " n " -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT";close(list);next} {print}' /etc/iptables/rules.v4.bak | sudo tee /etc/iptables/rules.v4 >/dev/null
+sudo sh -c 'iptables-restore --test < /etc/iptables/rules.v4' && echo syntax-ok
+sudo diff /etc/iptables/rules.v4.bak /etc/iptables/rules.v4 | grep -c '^[<>]'
+```
+
+Expected: `syntax-ok` and `17` (2 lines removed, 15 added). The backup file was removed afterwards.
+
+No procedure for refreshing the ranges has been exercised.
+
+### Firewall verification
+
+On the VM, rule order and counts:
+
+```bash
+sudo iptables -S INPUT
+sudo iptables -S INPUT | grep -c "dport 443"
+sudo iptables -S INPUT | grep -c "dport 80"
+```
+
+Expected: the order in [Applied rules](#applied-rules), then `15` and `0`.
+
+On the VM, compare the 443 rules with Cloudflare's current list:
+
+```bash
+diff <(curl -fsS https://www.cloudflare.com/ips-v4 | sort) <(sudo iptables -S INPUT | sed -n 's/^-A INPUT -s \([^ ]*\) .*--dport 443.*/\1/p' | sort) && echo in-sync
+```
+
+Expected: `in-sync`. This check compares the firewall rules only, not `deploy/nginx/cloudflare-real-ip.conf`.
+
+On the VM, packet counters on the Cloudflare range rules:
+
+```bash
+sudo iptables -L INPUT -v -n | grep 'dpt:443'
+```
+
+Expected: the `pkts` counters increase after requests through Cloudflare.
+
+From outside the VM, through Cloudflare:
+
+```bash
+curl -sI https://chambalink.online/healthz
+curl -sI http://chambalink.online/healthz
+```
+
+Expected: `HTTP/2 200` for the first; `301` with `server: cloudflare` for the second.
+
+From outside the VM, directly to the origin, with `<VM address>` replaced by the VM's public IPv4 address:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' --resolve chambalink.online:443:<VM address> https://chambalink.online/healthz; echo "exit=$?"
+```
+
+Expected: `000` and `exit=7` (could not connect).
+
+After a reboot, the chain had 15 rules matching `dport 443` and 0 matching `dport 80`, nginx was active, and `api` and `db` were healthy.
+
+### Checks that no longer work from outside the VM
+
+- Any request to the VM's address on port 80.
+- Any request to the VM's address on port 443 from an address outside Cloudflare's ranges, including `curl --cacert ... --resolve chambalink.online:443:<VM address>`. Run the origin certificate check on the VM against `127.0.0.1`, as in [TLS](#tls).
+
+The checks on the VM against `127.0.0.1` and the checks through `chambalink.online` are unaffected.
+
+### Docker
 
 Docker-published ports bypass `INPUT` rules. For this reason both containers publish on `127.0.0.1` only, and only nginx is reachable from outside.
 

@@ -12,7 +12,7 @@ Terminate TLS in nginx with a Cloudflare Origin CA certificate, serve clients th
 
 - No renewal automation exists. The certificate expires on Oct 18 2041.
 - Cloudflare sends no expiry notifications for Origin CA certificates.
-- The certificate is trusted only by Cloudflare. Clients that connect to the origin directly get an untrusted-certificate error, and browsers trust the site only while the records are proxied.
+- The certificate is trusted only by Cloudflare. A client that reaches the origin directly gets an untrusted-certificate error unless it trusts Cloudflare Origin CA, and browsers trust the site only while the records are proxied.
 - Full (strict) makes Cloudflare reject the origin if it presents a certificate that does not validate against Cloudflare Origin CA.
 - The private key has not left the VM.
 - The certificate is bound to the hostnames, not to the VM, so the same certificate and key work on any origin behind the Cloudflare proxy.

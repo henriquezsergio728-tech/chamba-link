@@ -106,6 +106,7 @@ The booking tests need the database to be running and migrated.
   - [0004 Native arm64 image build in CI](docs/decisions/0004-native-arm64-image-build.md)
   - [0005 Compose overlay with host nginx in production](docs/decisions/0005-compose-overlay-host-nginx.md)
   - [0006 Cloudflare Origin CA certificate behind the Cloudflare proxy](docs/decisions/0006-cloudflare-origin-ca-certificate.md)
+  - [0007 Host firewall restricted to Cloudflare's IPv4 ranges](docs/decisions/0007-host-firewall-cloudflare-ranges.md)
 
 ## License
 
