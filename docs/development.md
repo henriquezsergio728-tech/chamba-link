@@ -41,6 +41,8 @@ Root `package.json`:
 
 Run a package script from the root with `pnpm --filter @chamba/api <script>`.
 
+`pnpm typecheck` runs `tsc --noEmit` in `api/` with `api/tsconfig.json`, whose `include` is `["src"]`. It checks `api/src/` only. It does not typecheck `api/test/` or `api/drizzle.config.ts`.
+
 ## Local database
 
 `compose.yaml` defines one service, `db`, from `postgres:16`. It reads `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` from `.env`, publishes `127.0.0.1:5432`, and stores data in the named volume `pgdata`.
@@ -62,7 +64,9 @@ Tests use Vitest and live in `api/test/`.
 | File | Needs Postgres |
 | --- | --- |
 | `health.test.ts` | No. Uses Fastify `inject`. |
+| `client-ip.test.ts` | No. Uses Fastify `inject` with `remoteAddress` `127.0.0.1` to check `request.ip` for a given `X-Forwarded-For`. |
 | `booking-overlap.test.ts` | Yes. Needs a migrated database and `DATABASE_URL`, loaded from the environment or from `.env` at the repo root. |
+| `booking-concurrency.test.ts` | Yes. Same requirements as `booking-overlap.test.ts`. Commits on separate pooled connections and deletes every row it creates in `afterAll`. |
 
 ```bash
 pnpm test

@@ -17,7 +17,7 @@ A `CHECK` constraint rejects empty and unbounded ranges. See [Data model](../dat
 ## Consequences
 
 - The database enforces the rule for every writer.
-- Overlapping inserts fail with SQLSTATE `23P01`; empty or unbounded ranges fail with `23514`.
+- Overlapping inserts fail with SQLSTATE `23P01`. Concurrent overlapping inserts fail with `23P01` or `40P01` (`deadlock_detected`). Empty or unbounded ranges fail with `23514`.
 - Half-open ranges (`[start,end)`) allow back-to-back bookings.
 - Cancelled bookings do not block their slot.
 - The migration requires the `btree_gist` extension.

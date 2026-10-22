@@ -158,7 +158,7 @@ docker compose run --rm --no-deps api node dist/migrate.js
 docker compose up -d --wait
 ```
 
-When it was executed, `docker compose pull` also fetched a newer `postgres:16` image, because `compose.yaml` references the tag `postgres:16` rather than a digest. `docker compose up -d` then recreated the `db` container. The `pgdata` volume was kept.
+When it was executed, `docker compose pull` also fetched a newer `postgres:16` image, because `compose.yaml` references the tag `postgres:16` rather than a digest. `docker compose up -d` then recreated the `db` container. The `pgdata` volume was kept. `docker volume inspect` and `docker inspect` on the VM showed that the volume was created about two days before the recreated `db` container, so it was not recreated.
 
 `git pull --ff-only` updates the Compose files and the nginx config in the working copy. nginx reads a changed config only after a reload; see [nginx](#nginx).
 
