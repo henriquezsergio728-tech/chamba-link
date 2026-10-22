@@ -11,7 +11,8 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 - A database-level guarantee that a provider cannot hold two overlapping non-cancelled bookings, covered by integration tests.
 - A container image for the API that also ships a programmatic migrator.
 - A GitHub Actions pipeline that typechecks, migrates and tests on every pull request, builds an arm64 image, runs its migrator against a fresh Postgres, smoke-tests it, and publishes it to GitHub Container Registry from `main`.
-- A production Compose overlay and an nginx reverse-proxy config for a single VM.
+- A production Compose overlay and an nginx config for a single VM that serves `chambalink.online` and `www.chambalink.online` behind the Cloudflare proxy, terminates TLS with a Cloudflare Origin CA certificate, and restores visitor addresses from `CF-Connecting-IP`.
+- Client addresses taken from `X-Forwarded-For` when the API's peer is a loopback or private-network proxy, covered by tests.
 
 ## Repository layout
 
@@ -26,7 +27,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   ├── drizzle/              Generated and custom SQL migrations
 │   ├── test/                 Vitest tests
 │   └── drizzle.config.ts     drizzle-kit configuration
-├── deploy/nginx/             nginx site config for the production VM
+├── deploy/nginx/             nginx site config and Cloudflare real-IP ranges for the production VM
 ├── docs/                     Project documentation and ADRs
 ├── .github/
 │   ├── workflows/ci.yml      CI pipeline
@@ -104,6 +105,8 @@ The booking tests need the database to be running and migrated.
   - [0003 Prevent double booking with an exclusion constraint](docs/decisions/0003-exclusion-constraint-double-booking.md)
   - [0004 Native arm64 image build in CI](docs/decisions/0004-native-arm64-image-build.md)
   - [0005 Compose overlay with host nginx in production](docs/decisions/0005-compose-overlay-host-nginx.md)
+  - [0006 Cloudflare Origin CA certificate behind the Cloudflare proxy](docs/decisions/0006-cloudflare-origin-ca-certificate.md)
+  - [0007 Host firewall restricted to Cloudflare's IPv4 ranges](docs/decisions/0007-host-firewall-cloudflare-ranges.md)
 
 ## License
 
