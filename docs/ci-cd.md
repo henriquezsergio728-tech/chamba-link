@@ -19,7 +19,7 @@ Runs are grouped by `ci-${{ github.ref }}`. On pull requests, a new run cancels 
 
 ## Job `test`
 
-Runs on `ubuntu-24.04` with a `postgres:16` service container:
+Runs on `ubuntu-24.04` with a `postgres:16` service container, pinned to the same digest as the `db` image in `compose.yaml`:
 
 - user, password and database `chamba`
 - port `5432` mapped to the runner
@@ -53,7 +53,7 @@ Runs after `test` succeeds (`needs: test`), on `ubuntu-24.04-arm`, a native arm6
 
 The migrate step tests the migrator inside the built image:
 
-1. Creates a Docker network `ci` and starts a `postgres:16` container `pg` on it, with user, password and database `chamba`.
+1. Creates a Docker network `ci` and starts a `postgres:16` container `pg` on it, pinned to the same digest as the `db` image in `compose.yaml`, with user, password and database `chamba`.
 2. Polls `pg_isready` once per second, up to 60 times, then runs `pg_isready` once more so the step fails if Postgres is not ready.
 3. Runs `node dist/migrate.js` from the built image twice, with `DATABASE_URL=postgres://chamba:chamba@pg:5432/chamba`. The second run checks that applying migrations to an already migrated database succeeds.
 4. Queries `pg_constraint` and fails unless both `bookings_no_provider_overlap` and `bookings_during_bounded` exist.

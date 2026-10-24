@@ -24,7 +24,7 @@ flowchart LR
 | --- | --- | --- |
 | API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz`. |
 | Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. |
-| Database | `compose.yaml` | `postgres:16` with the named volume `pgdata`. |
+| Database | `compose.yaml` | `postgres:16` pinned to a digest, with the named volume `pgdata`. |
 | Edge proxy | Cloudflare (Free plan) | DNS for `chambalink.online`; proxies the apex and `www`. Configured in the Cloudflare dashboard, not in the repo. |
 | Reverse proxy | `deploy/nginx/chambalink.conf`, `deploy/nginx/cloudflare-real-ip.conf` | nginx installed on the host, not in a container. Terminates TLS. |
 | CI pipeline | `.github/workflows/ci.yml` | Jobs `test` and `image`. See [CI/CD](ci-cd.md). |

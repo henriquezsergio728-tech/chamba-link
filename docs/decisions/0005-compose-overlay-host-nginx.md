@@ -11,6 +11,7 @@ Run production as a Compose overlay: `compose.prod.yaml` adds the `api` service 
 ## Consequences
 
 - Development and production use the same `db` service definition.
+- The `db` image is pinned to a digest. Changing the Postgres build means changing the digest in `compose.yaml` and in `.github/workflows/ci.yml` in a pull request.
 - The `db` service publishes `127.0.0.1:5432` in production as well as in development.
 - Containers publish on `127.0.0.1` only. nginx is the only component listening on a public interface.
 - Changes to the nginx config go through pull requests like any other file.

@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-24.04
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:8e011e58c789a89790269f53614a28a58cb02706ce74ba6d9d4171613d0b75e1
         env:
           POSTGRES_USER: chamba
           POSTGRES_PASSWORD: chamba
@@ -58,7 +58,7 @@ jobs:
       - name: Migrate (shipped migrator, fresh Postgres, run twice)
         run: |
           docker network create ci
-          docker run -d --name pg --network ci -e POSTGRES_USER=chamba -e POSTGRES_PASSWORD=chamba -e POSTGRES_DB=chamba postgres:16
+          docker run -d --name pg --network ci -e POSTGRES_USER=chamba -e POSTGRES_PASSWORD=chamba -e POSTGRES_DB=chamba postgres:16@sha256:8e011e58c789a89790269f53614a28a58cb02706ce74ba6d9d4171613d0b75e1
           for _ in $(seq 60); do docker exec pg pg_isready -h 127.0.0.1 -U chamba -d chamba && break; sleep 1; done
           docker exec pg pg_isready -h 127.0.0.1 -U chamba -d chamba
           for _ in 1 2; do docker run --rm --network ci -e DATABASE_URL=postgres://chamba:chamba@pg:5432/chamba "$IMAGE:$GITHUB_SHA" node dist/migrate.js; done
