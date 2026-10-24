@@ -41,11 +41,11 @@ Root `package.json`:
 
 Run a package script from the root with `pnpm --filter @chamba/api <script>`.
 
-pnpm typecheck runs tsc --noEmit in api/ with api/tsconfig.json, which includes src, test and drizzle.config.ts. pnpm build compiles with api/tsconfig.build.json, which extends it and compiles src only into dist/.
+`pnpm typecheck` runs `tsc --noEmit` in `api/` with `api/tsconfig.json`, which includes `src`, `test` and `drizzle.config.ts`. The `build` script compiles with `api/tsconfig.build.json`, which extends it and compiles `src` only into `dist/`. Vitest transpiles test files without typechecking them, so type errors in `api/test/` surface only through `pnpm typecheck`.
 
 ## Local database
 
-`compose.yaml` defines one service, `db`, from `postgres:16`. It reads `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` from `.env`, publishes `127.0.0.1:5432`, and stores data in the named volume `pgdata`.
+`compose.yaml` defines one service, `db`, from `postgres:16` pinned to a digest (see `compose.yaml` for the reference). It reads `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` from `.env`, publishes `127.0.0.1:5432`, and stores data in the named volume `pgdata`.
 
 ```bash
 cp .env.example .env

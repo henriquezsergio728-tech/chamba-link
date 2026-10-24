@@ -158,7 +158,9 @@ docker compose run --rm --no-deps api node dist/migrate.js
 docker compose up -d --wait
 ```
 
-When it was executed, `docker compose pull` also fetched a newer `postgres:16` image, because `compose.yaml` references the tag `postgres:16` rather than a digest. `docker compose up -d` then recreated the `db` container. The `pgdata` volume was kept. `docker volume inspect` and `docker inspect` on the VM showed that the volume was created about two days before the recreated `db` container, so it was not recreated.
+When it was executed, `docker compose pull` also fetched a newer `postgres:16` image, because `compose.yaml` referenced the tag `postgres:16` rather than a digest at the time. `docker compose up -d` then recreated the `db` container. The `pgdata` volume was kept. `docker volume inspect` and `docker inspect` on the VM showed that the volume was created about two days before the recreated `db` container, so it was not recreated.
+
+`compose.yaml` now pins the `db` image to a `postgres:16` digest. The digest is the OCI image index of the `postgres:16` image running in production (PostgreSQL 16.15) and covers `linux/amd64` and `linux/arm64/v8`. `docker compose pull` no longer changes the Postgres build; changing it means changing the digest in `compose.yaml` and in `.github/workflows/ci.yml` in a pull request.
 
 `git pull --ff-only` updates the Compose files and the nginx config in the working copy. nginx reads a changed config only after a reload; see [nginx](#nginx).
 
