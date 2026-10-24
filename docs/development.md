@@ -34,14 +34,14 @@ Root `package.json`:
 | Script | Runs |
 | --- | --- |
 | `dev` | `tsx watch src/server.ts` |
-| `build` | `tsc`, output to `api/dist/` |
+| `build` | `tsc -p tsconfig.build.json`, output to `api/dist/` |
 | `start` | `node dist/server.js` |
 | `test` | `vitest run` |
 | `typecheck` | `tsc --noEmit` |
 
 Run a package script from the root with `pnpm --filter @chamba/api <script>`.
 
-`pnpm typecheck` runs `tsc --noEmit` in `api/` with `api/tsconfig.json`, whose `include` is `["src"]`. It checks `api/src/` only. It does not typecheck `api/test/` or `api/drizzle.config.ts`.
+pnpm typecheck runs tsc --noEmit in api/ with api/tsconfig.json, which includes src, test and drizzle.config.ts. pnpm build compiles with api/tsconfig.build.json, which extends it and compiles src only into dist/.
 
 ## Local database
 

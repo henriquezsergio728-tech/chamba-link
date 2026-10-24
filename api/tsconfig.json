@@ -6,9 +6,7 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
-    "rootDir": "src",
-    "outDir": "dist"
+    "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": ["src", "test", "drizzle.config.ts"]
 }
