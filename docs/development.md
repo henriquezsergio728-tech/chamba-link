@@ -34,12 +34,14 @@ Root `package.json`:
 | Script | Runs |
 | --- | --- |
 | `dev` | `tsx watch src/server.ts` |
-| `build` | `tsc`, output to `api/dist/` |
+| `build` | `tsc -p tsconfig.build.json`, output to `api/dist/` |
 | `start` | `node dist/server.js` |
 | `test` | `vitest run` |
 | `typecheck` | `tsc --noEmit` |
 
 Run a package script from the root with `pnpm --filter @chamba/api <script>`.
+
+`typecheck` uses `api/tsconfig.json`, which includes `src/`, `test/` and `drizzle.config.ts`. Vitest transpiles tests without typechecking them, so `pnpm typecheck` is what reports type errors in `test/`. `build` uses `api/tsconfig.build.json`, which extends `tsconfig.json` and compiles only `src/`, with `rootDir` `src` and `outDir` `dist`, so `src/server.ts` becomes `dist/server.js` and `src/migrate.ts` becomes `dist/migrate.js`.
 
 ## Local database
 
