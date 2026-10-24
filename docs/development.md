@@ -41,7 +41,7 @@ Root `package.json`:
 
 Run a package script from the root with `pnpm --filter @chamba/api <script>`.
 
-`typecheck` uses `api/tsconfig.json`, which includes `src/`, `test/` and `drizzle.config.ts`. Vitest transpiles tests without typechecking them, so `pnpm typecheck` is what reports type errors in `test/`. `build` uses `api/tsconfig.build.json`, which extends `tsconfig.json` and compiles only `src/`, with `rootDir` `src` and `outDir` `dist`, so `src/server.ts` becomes `dist/server.js` and `src/migrate.ts` becomes `dist/migrate.js`.
+pnpm typecheck runs tsc --noEmit in api/ with api/tsconfig.json, which includes src, test and drizzle.config.ts. pnpm build compiles with api/tsconfig.build.json, which extends it and compiles src only into dist/.
 
 ## Local database
 
@@ -64,7 +64,9 @@ Tests use Vitest and live in `api/test/`.
 | File | Needs Postgres |
 | --- | --- |
 | `health.test.ts` | No. Uses Fastify `inject`. |
+| `client-ip.test.ts` | No. Uses Fastify `inject` with `remoteAddress` `127.0.0.1` to check `request.ip` for a given `X-Forwarded-For`. |
 | `booking-overlap.test.ts` | Yes. Needs a migrated database and `DATABASE_URL`, loaded from the environment or from `.env` at the repo root. |
+| `booking-concurrency.test.ts` | Yes. Same requirements as `booking-overlap.test.ts`. Commits on separate pooled connections and deletes every row it creates in `afterAll`. |
 
 ```bash
 pnpm test

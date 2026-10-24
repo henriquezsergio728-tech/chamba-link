@@ -92,7 +92,7 @@ These constraints exist only in the migration SQL. They are not declared in `sch
 
 When concurrent inserters each see the other's uncommitted row, they wait on each other. Postgres breaks that cycle after `deadlock_timeout` and fails the waiter with `40P01` (`deadlock_detected`) instead of `23P01`.
 
-With `bookings_no_provider_overlap` dropped, the three concurrency tests fail.
+In a one-off check against a scratch database with `bookings_no_provider_overlap` dropped manually, the three concurrency tests failed. The repository does not automate this check.
 
 ## Migrations
 
