@@ -4,7 +4,7 @@ import { auditLog } from "./db/schema.js";
 // app.db or a transaction opened from it.
 export type Queryable = Pick<NodePgDatabase, "select" | "insert" | "update" | "delete">;
 
-export type AuditEvent = "account.registered" | "auth.login.succeeded" | "auth.login.failed" | "auth.logout";
+export type AuditEvent = "account.registered" | "auth.login.succeeded" | "auth.login.failed" | "auth.logout" | "auth.rate_limited";
 
 // Appends one row to audit_log. Callers must not pass passwords, tokens or the raw email of an unknown account.
 export async function audit(

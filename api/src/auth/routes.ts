@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import type { FastifyPluginAsyncTypebox } from "@fastify/type-provider-typebox";
 import { eq } from "drizzle-orm";
+import type { FastifyRequest } from "fastify";
 import { Type } from "typebox";
 import { audit } from "../audit.js";
 import { accountCredentials, accounts, sessions } from "../db/schema.js";
-import { AppError } from "../errors.js";
+import { AppError, describeError } from "../errors.js";
+import { clientKey, consume, peek, prune, RATE_LIMITS, reset, type Rule } from "../rate-limit.js";
 import { dummyHash, hashPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, verifyPassword } from "./password.js";
 import { type Account, clearSessionCookie, deleteExpiredSessions, hashToken, requireAccount, SESSION_COOKIE, startSession } from "./session.js";
 
@@ -23,6 +25,36 @@ const AccountBody = Type.Object({
   }),
 });
 
+// The problem body of a 429. A response schema drops undeclared members, so every member sendProblem writes is listed.
+const RateLimitedBody = Type.Object({
+  type: Type.String(),
+  title: Type.String(),
+  status: Type.Literal(429),
+  detail: Type.String(),
+  instance: Type.String(),
+  requestId: Type.String(),
+  code: Type.Literal("RATE_LIMITED"),
+  retryAfterSeconds: Type.Integer({ minimum: 1 }),
+});
+
+// Documented under the media type sendProblem sets, so the schema also applies when the 429 is serialized.
+const RateLimitedResponse = { description: "Too Many Requests", content: { "application/problem+json": { schema: RateLimitedBody } } };
+
+const rateLimited = (retryAfterSeconds: number) =>
+  new AppError({
+    status: 429,
+    code: "RATE_LIMITED",
+    title: "Too Many Requests",
+    detail: "Too many attempts. Try again later.",
+    extensions: { retryAfterSeconds },
+    headers: { "retry-after": String(retryAfterSeconds) },
+  });
+
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
+// Share of auth requests that also delete rate-limit rows older than 24 hours.
+const PRUNE_SAMPLE = 0.01;
+
 const invalidCredentials = () =>
   new AppError({ status: 401, code: "INVALID_CREDENTIALS", title: "Unauthorized", detail: "Invalid email or password" });
 
@@ -35,9 +67,36 @@ function pgError(err: unknown): { code?: string; constraint?: string } {
 
 export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
   // Responses carry account data or set a session cookie, so no cache may keep them. Error responses included.
-  app.addHook("onRequest", async (_request, reply) => {
+  app.addHook("onRequest", async (request, reply) => {
     reply.header("cache-control", "no-store");
+    if (Math.random() < PRUNE_SAMPLE) {
+      prune(app.db).catch((err) => request.log.error({ err: describeError(err) }, "rate limit prune failed"));
+    }
   });
+
+  // The limiter fails open: an error is logged and the request continues as if it were allowed.
+  async function limiter<T>(request: FastifyRequest, fn: () => Promise<T>): Promise<T | undefined> {
+    try {
+      return await fn();
+    } catch (err) {
+      request.log.error({ err: describeError(err) }, "rate limiter failed");
+      return undefined;
+    }
+  }
+
+  // auth.rate_limited is written once per key and window: audit rows cannot be deleted, so rejections must not add rows.
+  async function auditRateLimited(request: FastifyRequest, scope: "login-ip" | "login-email" | "register-ip") {
+    await audit(app.db, { event: "auth.rate_limited", ip: request.ip, requestId: request.id, metadata: { scope } });
+  }
+
+  // Counts the request against a per-client rule and rejects it with 429 once the rule's limit is passed.
+  async function limitClient(request: FastifyRequest, scope: "login-ip" | "register-ip", rule: Rule) {
+    const prefix = scope === "login-ip" ? "login:ip:" : "register:ip:";
+    const result = await limiter(request, () => consume(app.db, prefix + clientKey(request.ip), rule));
+    if (!result || result.allowed) return;
+    if (result.count === rule.limit + 1) await auditRateLimited(request, scope);
+    throw rateLimited(result.retryAfterSeconds);
+  }
 
   app.post(
     "/auth/register",
@@ -49,10 +108,11 @@ export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
           displayName: Type.String({ minLength: 1, maxLength: 80 }),
           role: Type.Union([Type.Literal("provider"), Type.Literal("client")]),
         }),
-        response: { 201: AccountBody },
+        response: { 201: AccountBody, 429: RateLimitedResponse },
       },
     },
     async (request, reply) => {
+      await limitClient(request, "register-ip", RATE_LIMITS.REGISTER_IP);
       const { password, displayName, role } = request.body;
       const email = request.body.email.toLowerCase();
       const passwordHash = await hashPassword(password);
@@ -81,11 +141,19 @@ export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
     {
       schema: {
         body: Type.Object({ email: Type.String({ maxLength: 254 }), password: Type.String({ maxLength: PASSWORD_MAX_LENGTH }) }),
-        response: { 200: AccountBody },
+        response: { 200: AccountBody, 429: RateLimitedResponse },
       },
     },
     async (request, reply) => {
+      await limitClient(request, "login-ip", RATE_LIMITS.LOGIN_IP);
       const email = request.body.email.toLowerCase();
+      const emailSha256 = sha256(email);
+      const emailKey = `login:email:${emailSha256}`;
+
+      // Checked before any password work, so a locked email costs no Argon2 computation.
+      const bucket = await limiter(request, () => peek(app.db, emailKey, RATE_LIMITS.LOGIN_EMAIL));
+      if (bucket?.exceeded) throw rateLimited(bucket.retryAfterSeconds);
+
       const [row] = await app.db
         .select({
           id: accounts.id,
@@ -101,8 +169,10 @@ export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
       // An unknown email still costs one verification, so response time does not reveal whether the account exists.
       const ok = await verifyPassword(request.body.password, row?.passwordHash ?? (await dummyHash()));
       if (!row || !ok) {
-        const emailSha256 = createHash("sha256").update(email).digest("hex");
         await audit(app.db, { event: "auth.login.failed", ip: request.ip, requestId: request.id, metadata: { emailSha256 } });
+        const failures = await limiter(request, () => consume(app.db, emailKey, RATE_LIMITS.LOGIN_EMAIL));
+        // The failure that reaches the limit locks the email; the next attempt is the first one rejected.
+        if (failures?.count === RATE_LIMITS.LOGIN_EMAIL.limit) await auditRateLimited(request, "login-email");
         throw invalidCredentials();
       }
 
@@ -112,6 +182,7 @@ export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
         await startSession(tx, reply, account.id);
         await audit(tx, { event: "auth.login.succeeded", actorAccountId: account.id, ip: request.ip, requestId: request.id });
       });
+      await limiter(request, () => reset(app.db, emailKey, RATE_LIMITS.LOGIN_EMAIL));
       return { account };
     },
   );

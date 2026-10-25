@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, customType, index, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, check, customType, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 // A Postgres tstzrange, passed through in its text form, e.g. '[2026-11-02 09:00+00,2026-11-02 10:00+00)'.
 export const tstzrange = customType<{ data: string; driverData: string }>({
@@ -53,6 +53,17 @@ export const auditLog = pgTable('audit_log', {
   requestId: text('request_id'),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
 });
+
+// One fixed-window counter per key and window. Rows older than 24 hours are pruned by the API.
+export const rateLimits = pgTable(
+  'rate_limits',
+  {
+    key: text('key').notNull(),
+    windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+    count: integer('count').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.key, t.windowStart] }), index('rate_limits_window_start_idx').on(t.windowStart)],
+);
 
 export const bookings = pgTable('bookings', {
   id: uuid('id').primaryKey().defaultRandom(),
