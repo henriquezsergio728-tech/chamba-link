@@ -1,7 +1,8 @@
+import { DrizzleQueryError } from "drizzle-orm";
 import { Type } from "typebox";
 import { afterAll, expect, test } from "vitest";
 import { buildApp } from "../src/app.js";
-import { AppError } from "../src/errors.js";
+import { AppError, describeError } from "../src/errors.js";
 
 const app = buildApp();
 app.get("/__app-error", async () => {
@@ -88,4 +89,32 @@ test("an unknown route is a 404 problem", async () => {
     instance: "/nope?q=1",
     requestId: res.headers["x-request-id"],
   });
+});
+
+test("describeError keeps a database error's code and constraint and drops the query, params and detail", () => {
+  const email = "probe@example.test";
+  const hash = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g";
+  const accountId = "00000000-0000-4000-8000-000000000000";
+  const cause = Object.assign(new Error('insert or update on table "account_credentials" violates foreign key constraint "account_credentials_account_id_accounts_id_fkey"'), {
+    code: "23503",
+    constraint: "account_credentials_account_id_accounts_id_fkey",
+    table: "account_credentials",
+    schema: "public",
+    detail: `Key (account_id)=(${accountId}) is not present in table "accounts".`,
+  });
+  const err = new DrizzleQueryError('insert into "account_credentials" ("account_id", "email", "password_hash") values ($1, $2, $3)', [accountId, email, hash], cause);
+
+  const described = describeError(err);
+  expect(described).toEqual({
+    name: "DrizzleQueryError",
+    cause: { code: "23503", constraint: "account_credentials_account_id_accounts_id_fkey", table: "account_credentials", schema: "public", message: cause.message },
+  });
+  const serialized = JSON.stringify(described);
+  for (const value of [email, hash, accountId, "detail", "params", "query", "Failed query"]) expect(serialized).not.toContain(value);
+});
+
+test("describeError returns any other error unchanged", () => {
+  const err = new Error("connection to db-secret-host failed");
+  expect(describeError(err)).toBe(err);
+  expect((describeError(err) as Error).message).toBe("connection to db-secret-host failed");
 });

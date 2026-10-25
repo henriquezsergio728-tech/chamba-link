@@ -33,6 +33,52 @@ The schema is defined in [`api/src/db/schema.ts`](../api/src/db/schema.ts) and c
 
 The foreign keys do not check the `role` of the referenced account.
 
+### `account_credentials`
+
+| Column | Type | Constraints |
+| --- | --- | --- |
+| `account_id` | `uuid` | Primary key, foreign key to `accounts.id` `ON DELETE CASCADE` |
+| `email` | `text` | Not null, unique (`account_credentials_email_key`) |
+| `password_hash` | `text` | Not null |
+| `created_at` | `timestamp with time zone` | Not null, default `now()` |
+
+`account_credentials_email_normalized` is `CHECK (email = lower(email) AND char_length(email) <= 254)`. The API lowercases emails before writing them, and maps a unique violation (`23505`) on `account_credentials_email_key` to `409 EMAIL_TAKEN`. `password_hash` is an argon2id PHC string; see [ADR 0009](decisions/0009-accounts-and-sessions.md).
+
+### `sessions`
+
+| Column | Type | Constraints |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key, default `gen_random_uuid()` |
+| `account_id` | `uuid` | Not null, foreign key to `accounts.id` `ON DELETE CASCADE`, index `sessions_account_id_idx` |
+| `token_hash` | `text` | Not null, unique |
+| `created_at` | `timestamp with time zone` | Not null, default `now()` |
+| `expires_at` | `timestamp with time zone` | Not null |
+
+`token_hash` is the hex SHA-256 of the session cookie's token, 64 characters. The token itself is not stored. The API sets `expires_at` to 30 days after creation and treats a row whose `expires_at` has passed as no session.
+
+### `audit_log`
+
+| Column | Type | Constraints |
+| --- | --- | --- |
+| `id` | `bigint` | Primary key, `GENERATED ALWAYS AS IDENTITY` |
+| `at` | `timestamp with time zone` | Not null, default `now()` |
+| `actor_account_id` | `uuid` | Nullable, no foreign key |
+| `event` | `text` | Not null |
+| `ip` | `text` | Nullable |
+| `request_id` | `text` | Nullable |
+| `metadata` | `jsonb` | Not null, default `'{}'` |
+
+`actor_account_id` has no foreign key so that rows remain after the account is deleted. Events written by the API:
+
+| `event` | `actor_account_id` | `metadata` |
+| --- | --- | --- |
+| `account.registered` | The new account | `{"role": ...}` |
+| `auth.login.succeeded` | The account | `{}` |
+| `auth.login.failed` | `null` | `{"emailSha256": ...}`, the hex SHA-256 of the lowercased email |
+| `auth.logout` | The session's account | `{}` |
+
+`auth.logout` is written only when the cookie named a session that was deleted.
+
 ## The `during` column
 
 `during` is a `tstzrange`, a range of timestamps with time zone. Drizzle has no built-in type for it, so `schema.ts` declares a custom type that passes the value through in Postgres text form, for example:
@@ -66,6 +112,28 @@ ALTER TABLE "bookings" ADD CONSTRAINT "bookings_no_provider_overlap"
 The constraint is enforced by Postgres for every writer, independent of application code.
 
 These constraints exist only in the migration SQL. They are not declared in `schema.ts` and do not appear in the drizzle-kit snapshots.
+
+## Append-only audit log
+
+Migration `20261025194207_audit-log-append-only` is a custom migration that adds a function and a row trigger:
+
+```sql
+CREATE FUNCTION "audit_log_reject_change"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_log is append-only: % is not allowed', TG_OP USING ERRCODE = 'insufficient_privilege';
+END;
+$$;
+
+CREATE TRIGGER "audit_log_append_only" BEFORE UPDATE OR DELETE ON "audit_log"
+  FOR EACH ROW EXECUTE FUNCTION "audit_log_reject_change"();
+```
+
+- Any `UPDATE` or `DELETE` that touches a row fails with SQLSTATE `42501` (`insufficient_privilege`) and the message `audit_log is append-only: UPDATE is not allowed` or `... DELETE ...`.
+- `TRUNCATE` does not fire row triggers and is not blocked.
+- The table's owner can drop or disable the trigger. See [ADR 0009](decisions/0009-accounts-and-sessions.md#consequences).
+- Like the booking constraints, the function and trigger exist only in the migration SQL, not in `schema.ts` or the snapshots.
+
+Because rows cannot be deleted, tests that write audit rows leave them in the database, and select them by the client address of the request that wrote them instead of counting rows.
 
 ## Tests
 

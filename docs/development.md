@@ -96,16 +96,18 @@ Tests use Vitest and live in `api/test/`.
 | `errors.test.ts` | No. Checks problem+json responses for `AppError`, unknown errors, validation errors, malformed JSON and unknown routes. |
 | `request-id.test.ts` | No. Checks which incoming `x-request-id` values are kept or replaced, and the header on error responses. |
 | `helmet.test.ts` | No. Checks `x-content-type-options` is set and HSTS and CSP are absent. |
-| `openapi.test.ts` | No. Checks `GET /v1/openapi.json` returns a document listing `/healthz`. |
+| `openapi.test.ts` | No. Checks `GET /v1/openapi.json` returns a document listing `/healthz`, the four account and session routes, and the `cookieAuth` security scheme on `/v1/me`. |
+| `password.test.ts` | No. Checks the argon2id PHC format, that verification accepts only the right password, reads its parameters from the stored string and returns `false` for malformed hashes, and that two hashes of one password differ. |
 | `db.test.ts` | Yes for two tests: one runs `SELECT 1` through `app.db` with `DATABASE_URL` and checks the pool is ended after `app.close()`; the other registers a route before the database plugin, as `server.ts` does, and queries through it. The other two use an unreachable URL: they check that an `error` event on the pool is handled and that the plugin does not connect at registration. |
 | `booking-overlap.test.ts` | Yes. Needs a migrated database and `DATABASE_URL`, loaded from the environment or from `.env` at the repo root. |
 | `booking-concurrency.test.ts` | Yes. Same requirements as `booking-overlap.test.ts`. Commits on separate pooled connections and deletes every row it creates in `afterAll`. |
+| `auth.test.ts` | Yes. Same requirements as `booking-overlap.test.ts`. Drives register, login, logout and `/v1/me` through `inject` with a random email and client address per test, and checks cookie attributes, stored hashes, identical login failures, `EMAIL_TAKEN`, expired and logged-out sessions, validation errors, `Cache-Control`, audit rows and the append-only trigger. Deletes the accounts it creates in `afterAll`, which cascades to credentials and sessions; its audit rows remain. |
 
 ```bash
 pnpm test
 ```
 
-See [Data model](data-model.md#tests) for what the booking tests cover.
+See [Data model](data-model.md#tests) for what the booking tests cover, and [Data model](data-model.md#append-only-audit-log) for why audit rows remain after the tests.
 
 ## Branches and pull requests
 
