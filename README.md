@@ -6,7 +6,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 
 ## What the repo implements today
 
-- A Fastify API on Node 24 and TypeScript that serves `GET /healthz`.
+- A Fastify API on Node 24 and TypeScript that serves `GET /healthz` and its generated OpenAPI document at `GET /v1/openapi.json`, returns errors as RFC 9457 problem details, tags every response with `x-request-id`, validates its environment at startup and shuts down cleanly on `SIGTERM`.
 - A Postgres 16 schema, managed with Drizzle, with `accounts` and `bookings` tables.
 - A database-level guarantee that a provider cannot hold two overlapping non-cancelled bookings, covered by integration tests.
 - A container image for the API that also ships a programmatic migrator.
@@ -21,7 +21,10 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 ├── api/                      @chamba/api workspace package
 │   ├── src/
 │   │   ├── app.ts            Fastify app factory and routes
-│   │   ├── server.ts         HTTP entry point
+│   │   ├── server.ts         HTTP entry point and graceful shutdown
+│   │   ├── config.ts         Environment validation for the entry points
+│   │   ├── db.ts             Postgres pool and Drizzle Fastify plugin
+│   │   ├── errors.ts         AppError and problem+json error handlers
 │   │   ├── migrate.ts        Programmatic migrator
 │   │   └── db/schema.ts      Drizzle schema
 │   ├── drizzle/              Generated and custom SQL migrations
@@ -77,11 +80,12 @@ pnpm --filter @chamba/api exec drizzle-kit migrate
 ### Run the API
 
 ```bash
+set -a; . ./.env; set +a
 pnpm dev
 curl http://127.0.0.1:3000/healthz
 ```
 
-The expected response is `{"status":"ok"}`.
+The server reads `DATABASE_URL` from the environment and exits if it is missing or invalid. The expected response is `{"status":"ok"}`. See [Development](docs/development.md#running-the-api) for the other variables.
 
 ### Typecheck and test
 
@@ -107,6 +111,7 @@ The booking tests need the database to be running and migrated.
   - [0005 Compose overlay with host nginx in production](docs/decisions/0005-compose-overlay-host-nginx.md)
   - [0006 Cloudflare Origin CA certificate behind the Cloudflare proxy](docs/decisions/0006-cloudflare-origin-ca-certificate.md)
   - [0007 Host firewall restricted to Cloudflare's IPv4 ranges](docs/decisions/0007-host-firewall-cloudflare-ranges.md)
+  - [0008 API conventions](docs/decisions/0008-api-conventions.md)
 
 ## License
 

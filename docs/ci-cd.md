@@ -59,7 +59,7 @@ The migrate step tests the migrator inside the built image:
 4. Queries `pg_constraint` and fails unless both `bookings_no_provider_overlap` and `bookings_during_bounded` exist.
 5. Removes the `pg` container.
 
-The smoke test runs the image with port `127.0.0.1:3000:3000` and polls `GET /healthz` with `curl -fsS`, retrying up to 20 times at 1 s intervals on any error, including connection refused and connection reset. On failure it prints `docker ps -a` and the container logs, then fails the job. The container runs without `DATABASE_URL`, which works because the API does not connect to the database.
+The smoke test runs the image with port `127.0.0.1:3000:3000` and polls `GET /healthz` with `curl -fsS`, retrying up to 20 times at 1 s intervals on any error, including connection refused and connection reset. On failure it prints `docker ps -a` and the container logs, then fails the job. The container runs with `DATABASE_URL=postgres://smoke:smoke@127.0.0.1:5432/smoke`, which points at no database. The API exits at startup without a valid `DATABASE_URL`, but its connection pool connects only when a query runs and `GET /healthz` runs none, so the smoke test needs no Postgres.
 
 ## Image
 
