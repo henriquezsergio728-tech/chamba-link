@@ -22,7 +22,7 @@ flowchart LR
 
 | Component | Source | Notes |
 | --- | --- | --- |
-| API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz` and `GET /v1/openapi.json`. See [API conventions](#api-conventions). |
+| API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz`, `GET /v1/openapi.json` and the account and session routes. See [API conventions](#api-conventions) and [Accounts and sessions](#accounts-and-sessions). |
 | Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. |
 | Database | `compose.yaml` | `postgres:16` pinned to a digest, with the named volume `pgdata`. |
 | Edge proxy | Cloudflare (Free plan) | DNS for `chambalink.online`; proxies the apex and `www`. Configured in the Cloudflare dashboard, not in the repo. |
@@ -41,7 +41,7 @@ The production VM is a single arm64 host. The domain `chambalink.online` is regi
 5. nginx proxies the request to `http://127.0.0.1:3000` with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set.
 6. Docker forwards `127.0.0.1:3000` to port 3000 of the `api` container, where Fastify listens on `0.0.0.0`. Fastify takes `request.ip` from `X-Forwarded-For` because its peer is in a loopback or private range (`trustProxy: "loopback,uniquelocal"`).
 
-The API and the migrator reach Postgres through `DATABASE_URL`, on the Compose network host `db`. The API creates a `pg` connection pool at startup that opens connections only when a query runs, and no route runs one, so in practice only the migrator connects.
+The API and the migrator reach Postgres through `DATABASE_URL`, on the Compose network host `db`. The API creates a `pg` connection pool at startup that opens connections only when a query runs. The account and session routes query Postgres; `GET /healthz` and `GET /v1/openapi.json` do not.
 
 The production VM has no IPv6 address. Cloudflare serves clients over IPv4 and IPv6 and reaches the origin over IPv4.
 
@@ -96,11 +96,37 @@ The `api` health check does not check database connectivity. In production, `api
 
 Recorded in [ADR 0008](decisions/0008-api-conventions.md):
 
-- Error responses are RFC 9457 `application/problem+json`. Errors other than `AppError` 4xx, validation errors and Fastify's own 4xx errors return a generic `500`; the cause is logged, not returned.
+- Error responses are RFC 9457 `application/problem+json`. Errors other than `AppError` 4xx, validation errors and Fastify's own 4xx errors return a generic `500`; the error is logged with the request id, not returned. Database errors are logged without the query or its parameters.
 - Every response carries `x-request-id`: the incoming value if it matches `^[A-Za-z0-9._-]{8,64}$`, otherwise a generated UUID.
 - `@fastify/helmet` sets security headers without `Strict-Transport-Security` and `Content-Security-Policy`.
 - `GET /v1/openapi.json` returns the OpenAPI document generated from route schemas. Application routes use the `/v1` prefix; `/healthz` stays at the root.
 - On `SIGTERM` or `SIGINT` the server closes the app and the Postgres pool and exits `0`, or exits `1` if closing takes more than 8 s.
+
+## Accounts and sessions
+
+Recorded in [ADR 0009](decisions/0009-accounts-and-sessions.md). The routes are in `api/src/auth/routes.ts` and appear in the OpenAPI document:
+
+| Route | Session required | Success |
+| --- | --- | --- |
+| `POST /v1/auth/register` | No | `201 {account}`, sets the `session` cookie |
+| `POST /v1/auth/login` | No | `200 {account}`, sets the `session` cookie |
+| `POST /v1/auth/logout` | No | `204`, clears the cookie |
+| `GET /v1/me` | Yes | `200 {account}` |
+
+`account` is `{id, role, displayName, email}`. Every response from these routes, including errors, carries `Cache-Control: no-store`.
+
+- `api/src/auth/session.ts` registers `@fastify/cookie`, decorates `request.account` (`null` by default), and exports the `requireAccount` preHandler. It hashes the cookie value with SHA-256, looks the hash up in `sessions` with `expires_at` in the future, and sets `request.account`, or answers `401` with code `UNAUTHENTICATED`. The OpenAPI document declares the cookie as the `apiKey` security scheme `cookieAuth`, used by `GET /v1/me`.
+- `api/src/auth/password.ts` hashes passwords with argon2id from `node:crypto`.
+- `api/src/audit.ts` appends rows to `audit_log`. See [Data model](data-model.md#audit_log).
+
+| Error | Status | `code` |
+| --- | --- | --- |
+| Wrong password or unknown email at login | `401` | `INVALID_CREDENTIALS` |
+| Missing, unknown or expired session | `401` | `UNAUTHENTICATED` |
+| Email already registered, in any letter case | `409` | `EMAIL_TAKEN` |
+| Body fails the schema | `400` | none; `errors` lists each problem |
+
+The `session` cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`, `Max-Age=2592000` (30 days), and `Secure` when `NODE_ENV` is `production`.
 
 ## Runtime configuration
 
@@ -111,8 +137,8 @@ Recorded in [ADR 0008](decisions/0008-api-conventions.md):
 | `PORT` | `api/src/server.ts` | `3000`; must be an integer from 1 to 65535 | Image sets `3000` |
 | `HOST` | `api/src/server.ts` | `127.0.0.1` | Image sets `0.0.0.0` |
 | `LOG_LEVEL` | `api/src/server.ts` | Fastify's default, `info` | Unset in the image and Compose files; one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
-| `NODE_ENV` | `api/src/app.ts` (logging is off when `test`) | unset | Image sets `production` |
-| `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking and database plugin tests | none | `.env` locally; built from `POSTGRES_*` in `compose.prod.yaml` |
+| `NODE_ENV` | `api/src/app.ts` (logging is off when `test`), `api/src/auth/session.ts` (the session cookie is `Secure` when `production`) | unset | Image sets `production` |
+| `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking, database plugin and auth tests | none | `.env` locally; built from `POSTGRES_*` in `compose.prod.yaml` |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `postgres:16` image, Compose interpolation | none | `.env` |
 | `API_TAG` | `compose.prod.yaml` image tag | required | Production `.env` |
 | `COMPOSE_FILE` | Docker Compose | `compose.yaml` | Production `.env` |

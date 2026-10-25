@@ -20,6 +20,20 @@ export class AppError extends Error {
   }
 }
 
+type DbCause = { code?: unknown; constraint?: unknown; table?: unknown; schema?: unknown; message?: unknown };
+
+// What the 500 branch logs for an error. A Drizzle query error carries the query and its parameters, which can hold
+// emails and password hashes, in `params`, `message` and `stack`, so only the database error's identifying fields are
+// kept. The pg `detail` field is dropped too, because it can echo key values.
+export function describeError(err: unknown): unknown {
+  if (typeof err !== "object" || err === null || !("query" in err || "params" in err)) return err;
+  const cause = ((err as { cause?: unknown }).cause ?? {}) as DbCause;
+  return {
+    name: (err as { name?: unknown }).name,
+    cause: { code: cause.code, constraint: cause.constraint, table: cause.table, schema: cause.schema, message: cause.message },
+  };
+}
+
 type Problem = { status: number; title: string; detail: string; code?: string; [extension: string]: unknown };
 
 // RFC 9457 problem details.
@@ -48,7 +62,8 @@ export function registerErrorHandlers(app: FastifyInstance) {
     if (!(err instanceof AppError) && err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
       return sendProblem(request, reply, { status: err.statusCode, title: STATUS_CODES[err.statusCode] ?? "Error", detail: err.message });
     }
-    request.log.error({ err }, "unhandled error");
+    // request.log is a child logger, so the line carries the request id as reqId.
+    request.log.error({ err: describeError(err) }, "unhandled error");
     return sendProblem(request, reply, { status: 500, title: "Internal Server Error", detail: "Internal Server Error" });
   });
 

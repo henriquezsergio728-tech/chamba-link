@@ -4,6 +4,8 @@ import swagger from "@fastify/swagger";
 import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import Fastify from "fastify";
 import { Type } from "typebox";
+import { authRoutes } from "./auth/routes.js";
+import { authPlugin } from "./auth/session.js";
 import { registerErrorHandlers } from "./errors.js";
 
 // Only ids that are safe to write into logs are accepted from the client.
@@ -27,9 +29,14 @@ export function buildApp() {
   // HSTS is left to the Cloudflare layer, and a JSON API serves no documents for a CSP to protect.
   app.register(helmet, { hsts: false, contentSecurityPolicy: false });
   app.register(swagger, {
-    openapi: { openapi: "3.1.0", info: { title: "ChambaLink API", version: "0.0.0" } },
+    openapi: {
+      openapi: "3.1.0",
+      info: { title: "ChambaLink API", version: "0.0.0" },
+      components: { securitySchemes: { cookieAuth: { type: "apiKey", in: "cookie", name: "session" } } },
+    },
   });
   registerErrorHandlers(app);
+  app.register(authPlugin);
 
   // Routes are registered as plugins so they load after @fastify/swagger and appear in the generated document.
   app.register(async (root) => {
@@ -43,6 +50,7 @@ export function buildApp() {
   app.register(
     async (v1) => {
       v1.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
+      v1.register(authRoutes);
     },
     { prefix: "/v1" },
   );
