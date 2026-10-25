@@ -22,7 +22,7 @@ flowchart LR
 
 | Component | Source | Notes |
 | --- | --- | --- |
-| API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz`. |
+| API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz` and `GET /v1/openapi.json`. See [API conventions](#api-conventions). |
 | Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. |
 | Database | `compose.yaml` | `postgres:16` pinned to a digest, with the named volume `pgdata`. |
 | Edge proxy | Cloudflare (Free plan) | DNS for `chambalink.online`; proxies the apex and `www`. Configured in the Cloudflare dashboard, not in the repo. |
@@ -41,7 +41,7 @@ The production VM is a single arm64 host. The domain `chambalink.online` is regi
 5. nginx proxies the request to `http://127.0.0.1:3000` with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set.
 6. Docker forwards `127.0.0.1:3000` to port 3000 of the `api` container, where Fastify listens on `0.0.0.0`. Fastify takes `request.ip` from `X-Forwarded-For` because its peer is in a loopback or private range (`trustProxy: "loopback,uniquelocal"`).
 
-The running API does not open a database connection. Only the migrator connects to Postgres, through `DATABASE_URL`, on the Compose network host `db`.
+The API and the migrator reach Postgres through `DATABASE_URL`, on the Compose network host `db`. The API creates a `pg` connection pool at startup that opens connections only when a query runs, and no route runs one, so in practice only the migrator connects.
 
 The production VM has no IPv6 address. Cloudflare serves clients over IPv4 and IPv6 and reaches the origin over IPv4.
 
@@ -92,14 +92,27 @@ Docker-published ports bypass the host's iptables `INPUT` rules, so both contain
 
 The `api` health check does not check database connectivity. In production, `api` starts only after `db` reports healthy (`depends_on` with `condition: service_healthy`).
 
+## API conventions
+
+Recorded in [ADR 0008](decisions/0008-api-conventions.md):
+
+- Error responses are RFC 9457 `application/problem+json`. Errors other than `AppError` 4xx, validation errors and Fastify's own 4xx errors return a generic `500`; the cause is logged, not returned.
+- Every response carries `x-request-id`: the incoming value if it matches `^[A-Za-z0-9._-]{8,64}$`, otherwise a generated UUID.
+- `@fastify/helmet` sets security headers without `Strict-Transport-Security` and `Content-Security-Policy`.
+- `GET /v1/openapi.json` returns the OpenAPI document generated from route schemas. Application routes use the `/v1` prefix; `/healthz` stays at the root.
+- On `SIGTERM` or `SIGINT` the server closes the app and the Postgres pool and exits `0`, or exits `1` if closing takes more than 8 s.
+
 ## Runtime configuration
+
+`api/src/server.ts` and `api/src/migrate.ts` validate their variables with the schemas in `api/src/config.ts` at startup. An empty value counts as unset. If a variable is missing or invalid, they print its name and `missing` or `invalid` to stderr, without the value, and exit with code 1.
 
 | Variable | Read by | Default | Source |
 | --- | --- | --- | --- |
-| `PORT` | `api/src/server.ts` | `3000` | Image sets `3000` |
+| `PORT` | `api/src/server.ts` | `3000`; must be an integer from 1 to 65535 | Image sets `3000` |
 | `HOST` | `api/src/server.ts` | `127.0.0.1` | Image sets `0.0.0.0` |
+| `LOG_LEVEL` | `api/src/server.ts` | Fastify's default, `info` | Unset in the image and Compose files; one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
 | `NODE_ENV` | `api/src/app.ts` (logging is off when `test`) | unset | Image sets `production` |
-| `DATABASE_URL` | `api/src/migrate.ts`, `api/drizzle.config.ts`, booking tests | none | `.env` locally; built from `POSTGRES_*` in `compose.prod.yaml` |
+| `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking and database plugin tests | none | `.env` locally; built from `POSTGRES_*` in `compose.prod.yaml` |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `postgres:16` image, Compose interpolation | none | `.env` |
 | `API_TAG` | `compose.prod.yaml` image tag | required | Production `.env` |
 | `COMPOSE_FILE` | Docker Compose | `compose.yaml` | Production `.env` |

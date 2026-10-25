@@ -55,7 +55,34 @@ pnpm --filter @chamba/api exec drizzle-kit migrate
 
 `.env.example` also defines `DATABASE_URL`, which drizzle-kit and the tests use. `.env` and `.env.*` are ignored by git, except `.env.example`.
 
-Locally, Compose uses `compose.yaml` only, so the API runs on the host with `pnpm dev` and listens on `127.0.0.1:3000`.
+Locally, Compose uses `compose.yaml` only, so the API runs on the host with `pnpm dev`.
+
+## Running the API
+
+The server reads its configuration from the process environment and does not load `.env`. It exits with code 1, naming the variable, if `DATABASE_URL` is unset or invalid.
+
+| Variable | Required | Default |
+| --- | --- | --- |
+| `DATABASE_URL` | Yes; must start with `postgres://` or `postgresql://` | none |
+| `PORT` | No; integer from 1 to 65535 | `3000` |
+| `HOST` | No | `127.0.0.1` |
+| `LOG_LEVEL` | No; `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` | `info` |
+
+To run it with the values from `.env`:
+
+```bash
+set -a; . ./.env; set +a
+pnpm dev
+```
+
+Check it with:
+
+```bash
+curl http://127.0.0.1:3000/healthz
+curl http://127.0.0.1:3000/v1/openapi.json
+```
+
+`Ctrl+C` sends `SIGINT`, which closes the app and the Postgres pool before the process exits. See [ADR 0008](decisions/0008-api-conventions.md) for the error format, request ids and the other API conventions.
 
 ## Tests
 
@@ -65,6 +92,12 @@ Tests use Vitest and live in `api/test/`.
 | --- | --- |
 | `health.test.ts` | No. Uses Fastify `inject`. |
 | `client-ip.test.ts` | No. Uses Fastify `inject` with `remoteAddress` `127.0.0.1` to check `request.ip` for a given `X-Forwarded-For`. |
+| `config.test.ts` | No. Checks environment validation, defaults, and that error output names variables without their values. |
+| `errors.test.ts` | No. Checks problem+json responses for `AppError`, unknown errors, validation errors, malformed JSON and unknown routes. |
+| `request-id.test.ts` | No. Checks which incoming `x-request-id` values are kept or replaced, and the header on error responses. |
+| `helmet.test.ts` | No. Checks `x-content-type-options` is set and HSTS and CSP are absent. |
+| `openapi.test.ts` | No. Checks `GET /v1/openapi.json` returns a document listing `/healthz`. |
+| `db.test.ts` | Yes for two tests: one runs `SELECT 1` through `app.db` with `DATABASE_URL` and checks the pool is ended after `app.close()`; the other registers a route before the database plugin, as `server.ts` does, and queries through it. The other two use an unreachable URL: they check that an `error` event on the pool is handled and that the plugin does not connect at registration. |
 | `booking-overlap.test.ts` | Yes. Needs a migrated database and `DATABASE_URL`, loaded from the environment or from `.env` at the repo root. |
 | `booking-concurrency.test.ts` | Yes. Same requirements as `booking-overlap.test.ts`. Commits on separate pooled connections and deletes every row it creates in `afterAll`. |
 
