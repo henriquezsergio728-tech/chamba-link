@@ -22,3 +22,14 @@ test("the auth routes appear in the document, and /v1/me requires the session co
   expect(doc.components.securitySchemes.cookieAuth).toEqual({ type: "apiKey", in: "cookie", name: "session" });
   await app.close();
 });
+
+test("register and login document the 429 response", async () => {
+  const app = buildApp();
+  const doc = (await app.inject({ method: "GET", url: "/v1/openapi.json" })).json();
+  for (const path of ["/v1/auth/register", "/v1/auth/login"]) {
+    const schema = doc.paths[path].post.responses["429"].content["application/problem+json"].schema;
+    expect(schema.properties.code).toMatchObject({ enum: ["RATE_LIMITED"] });
+    expect(schema.required).toContain("retryAfterSeconds");
+  }
+  await app.close();
+});

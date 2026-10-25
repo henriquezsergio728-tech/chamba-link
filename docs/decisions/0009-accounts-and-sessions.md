@@ -36,7 +36,7 @@ The hash is stored as a PHC string, `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash
 - Anyone can register with an email address they do not control.
 - The database holds hashes of passwords and session tokens, never the values.
 - Every registration and login request that passes schema validation, including a login for an unknown email, runs one Argon2 computation with 19 MiB of memory.
-- These endpoints have no rate limit.
+- Registration and login are rate limited per client address, and login failures per email; see [ADR 0010](0010-rate-limiting.md). Logout and `GET /v1/me` are not rate limited.
 - A stolen cookie is valid until its session expires or is logged out. Other sessions of the same account stay valid after a logout.
 - A request from a sibling subdomain of `chambalink.online` is not blocked by `SameSite=Lax`.
 - `emailSha256` is unsalted, so anyone with read access to `audit_log` can confirm a guessed email.

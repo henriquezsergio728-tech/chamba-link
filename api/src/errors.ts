@@ -8,8 +8,9 @@ export class AppError extends Error {
   readonly title: string;
   readonly detail: string;
   readonly extensions?: Record<string, unknown>;
+  readonly headers?: Record<string, string>;
 
-  constructor(opts: { status: number; code: string; title: string; detail: string; extensions?: Record<string, unknown> }) {
+  constructor(opts: { status: number; code: string; title: string; detail: string; extensions?: Record<string, unknown>; headers?: Record<string, string> }) {
     super(opts.detail);
     this.name = "AppError";
     this.status = opts.status;
@@ -17,6 +18,7 @@ export class AppError extends Error {
     this.title = opts.title;
     this.detail = opts.detail;
     this.extensions = opts.extensions;
+    this.headers = opts.headers;
   }
 }
 
@@ -48,6 +50,7 @@ function sendProblem(request: FastifyRequest, reply: FastifyReply, problem: Prob
 export function registerErrorHandlers(app: FastifyInstance) {
   app.setErrorHandler((err: FastifyError | AppError, request, reply) => {
     if (err instanceof AppError && err.status < 500) {
+      if (err.headers) reply.headers(err.headers);
       return sendProblem(request, reply, { ...err.extensions, status: err.status, title: err.title, detail: err.detail, code: err.code });
     }
     if (!(err instanceof AppError) && err.validation) {

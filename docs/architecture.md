@@ -125,8 +125,27 @@ Recorded in [ADR 0009](decisions/0009-accounts-and-sessions.md). The routes are 
 | Missing, unknown or expired session | `401` | `UNAUTHENTICATED` |
 | Email already registered, in any letter case | `409` | `EMAIL_TAKEN` |
 | Body fails the schema | `400` | none; `errors` lists each problem |
+| Rate limit reached on register or login | `429` | `RATE_LIMITED`; `retryAfterSeconds` and the `Retry-After` header give the seconds until the window ends |
 
 The `session` cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`, `Max-Age=2592000` (30 days), and `Secure` when `NODE_ENV` is `production`.
+
+### Rate limiting
+
+Recorded in [ADR 0010](decisions/0010-rate-limiting.md). `api/src/rate-limit.ts` keeps fixed-window counters in the Postgres table `rate_limits` ([Data model](data-model.md#rate_limits)), with windows computed from the application clock.
+
+| Rule | Applies to | Limit |
+| --- | --- | --- |
+| `REGISTER_IP` | `POST /v1/auth/register`, per client address | 10 per hour |
+| `LOGIN_IP` | `POST /v1/auth/login`, per client address | 30 per 15 minutes |
+| `LOGIN_EMAIL` | Failed `POST /v1/auth/login` attempts, per lowercased email | 10 per 15 minutes |
+
+- The client address is `request.ip`; an IPv6 address counts by its /64, and an IPv4-mapped IPv6 address as IPv4.
+- Requests rejected by schema validation are not counted.
+- Login checks the email's failure count before any password work, counts a failure after a wrong password or unknown email, and resets the count after a successful login.
+- If a limiter query fails, the error is logged as `rate limiter failed` without query parameters and the request proceeds as if allowed.
+- One in a hundred requests to these routes also deletes rate-limit rows older than 24 hours, without waiting for the result.
+- `auth.rate_limited` is written to `audit_log` once per key and window.
+
 
 ## Runtime configuration
 

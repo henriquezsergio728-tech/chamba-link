@@ -7,7 +7,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 ## What the repo implements today
 
 - A Fastify API on Node 24 and TypeScript that serves `GET /healthz` and its generated OpenAPI document at `GET /v1/openapi.json`, returns errors as RFC 9457 problem details, tags every response with `x-request-id`, validates its environment at startup and shuts down cleanly on `SIGTERM`.
-- Email and password accounts with argon2id password hashes, 30-day cookie sessions stored as token hashes, and an append-only audit log of registrations, logins and logouts, served at `POST /v1/auth/register`, `POST /v1/auth/login`, `POST /v1/auth/logout` and `GET /v1/me`.
+- Email and password accounts with argon2id password hashes, 30-day cookie sessions stored as token hashes, an append-only audit log of registrations, logins and logouts, and Postgres-backed rate limits on registration and login, served at `POST /v1/auth/register`, `POST /v1/auth/login`, `POST /v1/auth/logout` and `GET /v1/me`.
 - A Postgres 16 schema, managed with Drizzle, with `accounts`, `account_credentials`, `sessions`, `audit_log` and `bookings` tables.
 - A database-level guarantee that a provider cannot hold two overlapping non-cancelled bookings, covered by integration tests.
 - A container image for the API that also ships a programmatic migrator.
@@ -27,6 +27,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   │   ├── db.ts             Postgres pool and Drizzle Fastify plugin
 │   │   ├── errors.ts         AppError and problem+json error handlers
 │   │   ├── audit.ts          Audit log writer
+│   │   ├── rate-limit.ts     Fixed-window rate limits stored in Postgres
 │   │   ├── auth/             Password hashing, sessions and account routes
 │   │   ├── migrate.ts        Programmatic migrator
 │   │   └── db/schema.ts      Drizzle schema
@@ -97,12 +98,12 @@ pnpm typecheck
 pnpm test
 ```
 
-The booking, database plugin and auth tests need the database to be running and migrated.
+The booking, database plugin, auth and rate-limit tests need the database to be running and migrated.
 
 ## Documentation
 
 - [Architecture](docs/architecture.md): components as deployed, request path and runtime configuration
-- [Data model](docs/data-model.md): tables, the no-overlap guarantee, the append-only audit log and migrations
+- [Data model](docs/data-model.md): tables, the no-overlap guarantee, the append-only audit log, rate-limit counters and migrations
 - [Development](docs/development.md): toolchain, scripts, tests and contribution rules
 - [CI/CD](docs/ci-cd.md): the GitHub Actions pipeline and image registry
 - [Deployment](docs/deployment.md): production VM runbook
@@ -116,6 +117,7 @@ The booking, database plugin and auth tests need the database to be running and 
   - [0007 Host firewall restricted to Cloudflare's IPv4 ranges](docs/decisions/0007-host-firewall-cloudflare-ranges.md)
   - [0008 API conventions](docs/decisions/0008-api-conventions.md)
   - [0009 Accounts, password hashing, cookie sessions and audit log](docs/decisions/0009-accounts-and-sessions.md)
+  - [0010 Rate limiting in Postgres](docs/decisions/0010-rate-limiting.md)
 
 ## License
 

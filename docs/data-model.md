@@ -76,8 +76,19 @@ The foreign keys do not check the `role` of the referenced account.
 | `auth.login.succeeded` | The account | `{}` |
 | `auth.login.failed` | `null` | `{"emailSha256": ...}`, the hex SHA-256 of the lowercased email |
 | `auth.logout` | The session's account | `{}` |
+| `auth.rate_limited` | `null` | `{"scope": "login-ip" \| "login-email" \| "register-ip"}` |
 
-`auth.logout` is written only when the cookie named a session that was deleted.
+`auth.logout` is written only when the cookie named a session that was deleted. `auth.rate_limited` is written once per rate-limit key and window; see [ADR 0010](decisions/0010-rate-limiting.md#decision).
+
+### `rate_limits`
+
+| Column | Type | Constraints |
+| --- | --- | --- |
+| `key` | `text` | Not null, part of the primary key |
+| `window_start` | `timestamp with time zone` | Not null, part of the primary key, index `rate_limits_window_start_idx` |
+| `count` | `integer` | Not null |
+
+The primary key `rate_limits_pkey` is `(key, window_start)`. Each row counts the hits for one key in one fixed window. Keys are `login:ip:<client>`, `register:ip:<client>` and `login:email:<hex SHA-256 of the lowercased email>`, where `<client>` is an IPv4 address or an IPv6 /64 such as `2001:db8:0:1/64`. The API computes `window_start` from its own clock and increments `count` with `INSERT ... ON CONFLICT (key, window_start) DO UPDATE SET count = rate_limits.count + 1`. Rows whose `window_start` is more than 24 hours old are deleted by a sampled request; `rate_limits_window_start_idx` serves that deletion. See [ADR 0010](decisions/0010-rate-limiting.md).
 
 ## The `during` column
 
