@@ -35,6 +35,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   ├── test/                 Vitest tests
 │   └── drizzle.config.ts     drizzle-kit configuration
 ├── deploy/nginx/             nginx site config and Cloudflare real-IP ranges for the production VM
+├── ops/                      Database backup script and its systemd units
 ├── docs/                     Project documentation and ADRs
 ├── .github/
 │   ├── workflows/ci.yml      CI pipeline
@@ -118,6 +119,7 @@ The booking, database plugin, auth and rate-limit tests need the database to be 
   - [0008 API conventions](docs/decisions/0008-api-conventions.md)
   - [0009 Accounts, password hashing, cookie sessions and audit log](docs/decisions/0009-accounts-and-sessions.md)
   - [0010 Rate limiting in Postgres](docs/decisions/0010-rate-limiting.md)
+  - [0011 Logical database backups to Object Storage](docs/decisions/0011-database-backups.md)
 
 ## License
 

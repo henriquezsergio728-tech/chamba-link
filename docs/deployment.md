@@ -2,7 +2,7 @@
 
 Runbook for the production VM. Commands that start with `cd /opt/chambalink` or use `docker compose` run on the VM as the `ubuntu` user unless they use `sudo`. Commands marked as run from outside the VM run on any other machine.
 
-Production is a single host. The repository defines no backup for the `pgdata` volume. The host firewall rules that restrict port 443 to Cloudflare's IPv4 ranges exist only on the VM, not in the repository.
+Production is a single host. A systemd timer backs up the database to Object Storage every six hours; see [Backups](#backups). The host firewall rules that restrict port 443 to Cloudflare's IPv4 ranges exist only on the VM, not in the repository.
 
 ## Host
 
@@ -27,6 +27,8 @@ Production is a single host. The repository defines no backup for the `pgdata` v
 | `/etc/iptables/rules.v4` | root | Persisted host IPv4 firewall rules |
 | `/etc/docker/daemon.json` | root | Docker log rotation |
 | `/etc/cloud/cloud.cfg.d/99-hostname.cfg` | root | `preserve_hostname: true` |
+| `/etc/chambalink/backup.env` | `root`, mode `600` | Backup configuration; see [Backups](#backups) |
+| `/etc/systemd/system/chambalink-backup.service`, `.timer` | root | Symlinks to the units in `/opt/chambalink/ops/systemd/` |
 
 The clone uses a read-only GitHub deploy key scoped to this repository. The key exists only on the VM.
 
@@ -372,6 +374,64 @@ The checks on the VM against `127.0.0.1` and the checks through `chambalink.onli
 
 Docker-published ports bypass `INPUT` rules. For this reason both containers publish on `127.0.0.1` only, and only nginx is reachable from outside.
 
+## Backups
+
+`ops/backup.sh` dumps the database with `pg_dump -Fc`, checks the archive with `pg_restore --list`, uploads it to a private, versioned Object Storage bucket with the OCI CLI and the VM's instance principal, and compares the uploaded object's size with the local file. Objects are named `postgres/YYYY/MM/chambalink-YYYYMMDDTHHMMSSZ.dump`. `ops/systemd/chambalink-backup.timer` starts `chambalink-backup.service`, which runs the script as root, at 00:15, 06:15, 12:15 and 18:15 UTC with up to 120 s of random delay. See [ADR 0011](decisions/0011-database-backups.md).
+
+### Configuration
+
+`/etc/chambalink/backup.env` is the unit's `EnvironmentFile`:
+
+| Key | Value |
+| --- | --- |
+| `BACKUP_BUCKET` | Name of the Object Storage bucket |
+| `OCI_CLI` | Absolute path of the `oci` executable; systemd does not search the login shell's `PATH` for it |
+
+The script also reads `BACKUP_LOCK`, the lock file path, which defaults to `/run/lock/chambalink-backup.lock`.
+
+### Install
+
+Create the configuration file and set both keys:
+
+```bash
+sudo install -d -m 700 /etc/chambalink
+sudo install -m 600 /dev/null /etc/chambalink/backup.env
+sudoedit /etc/chambalink/backup.env
+```
+
+Link the units from the clone and start the timer:
+
+```bash
+sudo systemctl link /opt/chambalink/ops/systemd/chambalink-backup.service /opt/chambalink/ops/systemd/chambalink-backup.timer
+sudo systemctl enable --now chambalink-backup.timer
+systemctl list-timers chambalink-backup.timer
+```
+
+`list-timers` shows the next run. The units are symlinks into the clone, so `git pull` updates them; run `sudo systemctl daemon-reload` after a pull that changes a unit file.
+
+### Run a backup now
+
+```bash
+sudo systemctl start chambalink-backup.service
+```
+
+The command returns when the backup has finished. A failed backup makes it exit non-zero.
+
+### Logs
+
+```bash
+sudo journalctl -u chambalink-backup.service
+systemctl status chambalink-backup.service
+```
+
+A successful run logs `backup ok: <object name> <bytes> bytes in <seconds>s`. A failed run logs a line starting with `backup:` and leaves the unit in the `failed` state.
+
+### List backups
+
+```bash
+sudo sh -c '. /etc/chambalink/backup.env && "$OCI_CLI" os object list --auth instance_principal --bucket-name "$BACKUP_BUCKET" --prefix postgres/ --all'
+```
+
 ## Logs
 
 | Source | Command |
@@ -380,6 +440,7 @@ Docker-published ports bypass `INPUT` rules. For this reason both containers pub
 | Database | `docker compose logs --tail 200 db` |
 | nginx access and errors | `sudo tail -n 200 /var/log/nginx/access.log /var/log/nginx/error.log` |
 | nginx service | `sudo journalctl -u nginx --since today` |
+| Backups | `sudo journalctl -u chambalink-backup.service` |
 
 Run the `docker compose` commands from `/opt/chambalink`. Add `-f` to follow.
 
