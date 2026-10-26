@@ -34,7 +34,10 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   ├── drizzle/              Generated and custom SQL migrations
 │   ├── test/                 Vitest tests
 │   └── drizzle.config.ts     drizzle-kit configuration
-├── deploy/nginx/             nginx site config and Cloudflare real-IP ranges for the production VM
+├── deploy/
+│   ├── nginx/                nginx site config and Cloudflare real-IP ranges for the production VM
+│   ├── db/compose.yaml       Postgres-only Compose project for a database host
+│   └── app/compose.yaml      Overlay that runs the API without a local database
 ├── ops/                      Database backup script and its systemd units
 ├── docs/                     Project documentation and ADRs
 ├── .github/

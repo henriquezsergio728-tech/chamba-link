@@ -1,0 +1,4 @@
+# Application-node overlay for compose.prod.yaml: drops the api's dependency on the local db service.
+services:
+  api:
+    depends_on: !reset {}

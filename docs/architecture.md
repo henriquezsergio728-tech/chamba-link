@@ -32,6 +32,8 @@ flowchart LR
 
 The production VM is a single arm64 host. The domain `chambalink.online` is registered at GoDaddy, with DNS hosted on Cloudflare. Production runs `compose.yaml` and `compose.prod.yaml` together. See [Deployment](deployment.md).
 
+The Compose files support two modes. In the single-host mode, `compose.yaml` and `compose.prod.yaml` run `db` and `api` on one host and the API reaches Postgres at `db:5432`. In the split mode, a database host runs `deploy/db/compose.yaml`, which runs only Postgres and publishes 5432 on the host's private address (`DB_BIND_ADDR`), and each application node runs `compose.prod.yaml` with `deploy/app/compose.yaml`, which runs only `api` with `DATABASE_URL` pointing at the database host. See [Deployment](deployment.md#database-host).
+
 ## Request path
 
 1. A client resolves `chambalink.online` or `www.chambalink.online` to Cloudflare addresses. `www` is a CNAME to the apex, and both records are proxied.
@@ -161,7 +163,7 @@ Recorded in [ADR 0010](decisions/0010-rate-limiting.md). `api/src/rate-limit.ts`
 | `HOST` | `api/src/server.ts` | `127.0.0.1` | Image sets `0.0.0.0` |
 | `LOG_LEVEL` | `api/src/server.ts` | Fastify's default, `info` | Unset in the image and Compose files; one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
 | `NODE_ENV` | `api/src/app.ts` (logging is off when `test`), `api/src/auth/session.ts` (the session cookie is `Secure` when `production`) | unset | Image sets `production` |
-| `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking, database plugin and auth tests | none | `.env` locally; built from `POSTGRES_*` in `compose.prod.yaml` |
+| `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking, database plugin and auth tests | none | `.env` locally; in `compose.prod.yaml`, the `DATABASE_URL` variable when set, otherwise built from `POSTGRES_*` |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `postgres:16` image, Compose interpolation | none | `.env` |
 | `API_TAG` | `compose.prod.yaml` image tag | required | Production `.env` |
 | `COMPOSE_FILE` | Docker Compose | `compose.yaml` | Production `.env` |
