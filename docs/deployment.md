@@ -162,7 +162,7 @@ docker compose up -d --wait
 
 When it was executed, `docker compose pull` also fetched a newer `postgres:16` image, because `compose.yaml` referenced the tag `postgres:16` rather than a digest at the time. `docker compose up -d` then recreated the `db` container. The `pgdata` volume was kept. `docker volume inspect` and `docker inspect` on the VM showed that the volume was created about two days before the recreated `db` container, so it was not recreated.
 
-`compose.yaml` now pins the `db` image to a `postgres:16` digest. The digest is the OCI image index of the `postgres:16` image running in production (PostgreSQL 16.15) and covers `linux/amd64` and `linux/arm64/v8`. `docker compose pull` no longer changes the Postgres build; changing it means changing the digest in `compose.yaml` and in `.github/workflows/ci.yml` in a pull request.
+`compose.yaml` now pins the `db` image to a `postgres:16` digest. The digest is the OCI image index of the `postgres:16` image running in production (PostgreSQL 16.15) and covers `linux/amd64` and `linux/arm64/v8`. `docker compose pull` no longer changes the Postgres build; changing it means changing the digest in `compose.yaml`, `deploy/db/compose.yaml` and `.github/workflows/ci.yml` in a pull request.
 
 `git pull --ff-only` updates the Compose files and the nginx config in the working copy. nginx reads a changed config only after a reload; see [nginx](#nginx).
 
@@ -386,6 +386,7 @@ Docker-published ports bypass `INPUT` rules. For this reason both containers pub
 | --- | --- |
 | `BACKUP_BUCKET` | Name of the Object Storage bucket |
 | `OCI_CLI` | Absolute path of the `oci` executable; systemd does not search the login shell's `PATH` for it |
+| `COMPOSE_FILE` | Optional. Compose file list for the script's `docker compose exec` calls, for example `deploy/db/compose.yaml` on a database host; see [Database host](#database-host). Unset, Compose takes `COMPOSE_FILE` from the clone's `.env` |
 
 The script also reads `BACKUP_LOCK`, the lock file path, which defaults to `/run/lock/chambalink-backup.lock`.
 
@@ -431,6 +432,28 @@ A successful run logs `backup ok: <object name> <bytes> bytes in <seconds>s`. A 
 ```bash
 sudo sh -c '. /etc/chambalink/backup.env && "$OCI_CLI" os object list --auth instance_principal --bucket-name "$BACKUP_BUCKET" --prefix postgres/ --all'
 ```
+
+## Database host
+
+[`deploy/db/compose.yaml`](../deploy/db/compose.yaml) runs only Postgres, as the Compose project `chambalink-db`. Its `db` service uses the same pinned image as `compose.yaml`, the named volume `pgdata`, the same `pg_isready` healthcheck and `restart: unless-stopped`, and starts Postgres with `max_connections=50`, `shared_buffers=128MB` and `effective_cache_size=384MB`. It publishes port 5432 on `DB_BIND_ADDR` only.
+
+| Variable | Purpose |
+| --- | --- |
+| `DB_BIND_ADDR` | Required. The host's private address; 5432 is published on it. Compose refuses to start the file when it is unset |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | As in [Production environment](#production-environment) |
+| `COMPOSE_FILE` | `deploy/db/compose.yaml`, so `docker compose` commands in the clone use this file |
+
+Docker Compose reads these from `.env` in the directory where `docker compose` runs, so the clone's `.env` serves `docker compose` commands and `ops/backup.sh` alike. The backup units and `/etc/chambalink/backup.env` are installed as in [Backups](#backups).
+
+An application node runs only the `api` service and reaches the database over the private network. It uses `compose.prod.yaml` with [`deploy/app/compose.yaml`](../deploy/app/compose.yaml), which removes the api's `depends_on` on `db`, and sets `DATABASE_URL`:
+
+| Variable | Value |
+| --- | --- |
+| `COMPOSE_FILE` | `compose.prod.yaml:deploy/app/compose.yaml` |
+| `DATABASE_URL` | `postgres://<user>:<password>@<database host private address>:5432/<database>` |
+| `API_TAG` | As in [Production environment](#production-environment) |
+
+`compose.prod.yaml` uses `DATABASE_URL` when it is set and otherwise builds it from the `POSTGRES_*` variables for the `db` service. With this file list, `docker compose up -d --wait` starts only `api`, and `docker compose run --rm api node dist/migrate.js` runs the migrator against the database host. `deploy/app/compose.yaml` uses the `!reset` tag, which needs Docker Compose 2.24.0 or later.
 
 ## Logs
 
