@@ -83,6 +83,10 @@ The host firewall accepts new TCP connections on 443 only from the 15 Cloudflare
 
 Docker-published ports bypass the host's iptables `INPUT` rules, so both containers publish on loopback only.
 
+## Backups
+
+A systemd timer on the production host runs `ops/backup.sh` as root every six hours. It dumps the database with `pg_dump -Fc` through `docker compose exec -T db`, checks the archive with `pg_restore --list`, and uploads it with the OCI CLI, authenticated as the VM's instance principal, to a private, versioned Object Storage bucket, then compares the stored object's size with the dump's. Restores are manual. See [Deployment](deployment.md#backups) and [ADR 0011](decisions/0011-database-backups.md).
+
 ## Health checks
 
 | Service | Check | Defined in |

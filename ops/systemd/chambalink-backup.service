@@ -1,0 +1,10 @@
+[Unit]
+Description=ChambaLink Postgres backup to Object Storage
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/chambalink/backup.env
+ExecStart=/opt/chambalink/ops/backup.sh
+TimeoutStartSec=15min
