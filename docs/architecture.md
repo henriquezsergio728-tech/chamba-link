@@ -11,41 +11,46 @@ flowchart LR
     actions --> test[test job]
     test --> image[image job]
     image -->|push to main only| ghcr[GHCR: chamba-link-api]
-    ghcr -->|docker compose pull| vm
+    ghcr -->|docker compose pull| apphost
     client[Client] -->|HTTPS, IPv4 or IPv6| cf[Cloudflare proxy]
     cf -->|HTTPS :443, IPv4| nginx
-    subgraph vm[Production VM]
+    subgraph apphost[Application host, arm64]
         nginx[nginx :80 / :443] --> api[api container :3000]
-        api --> db[(Postgres container :5432)]
     end
+    subgraph dbhost[Database host, x86_64]
+        db[(Postgres container :5432)]
+    end
+    api -->|TCP 5432, private network| db
+    db -->|ops/backup.sh every 6 h| bucket[(Object Storage bucket)]
 ```
 
 | Component | Source | Notes |
 | --- | --- | --- |
 | API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz`, `GET /v1/openapi.json` and the account and session routes. See [API conventions](#api-conventions) and [Accounts and sessions](#accounts-and-sessions). |
 | Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. |
-| Database | `compose.yaml` | `postgres:16` pinned to a digest, with the named volume `pgdata`. |
+| Database | `deploy/db/compose.yaml` in production, `compose.yaml` locally | `postgres:16` pinned to a digest, with the named volume `pgdata`. In production, started with `max_connections=50`, `shared_buffers=128MB` and `effective_cache_size=384MB`. |
 | Edge proxy | Cloudflare (Free plan) | DNS for `chambalink.online`; proxies the apex and `www`. Configured in the Cloudflare dashboard, not in the repo. |
 | Reverse proxy | `deploy/nginx/chambalink.conf`, `deploy/nginx/cloudflare-real-ip.conf` | nginx installed on the host, not in a container. Terminates TLS. |
 | CI pipeline | `.github/workflows/ci.yml` | Jobs `test` and `image`. See [CI/CD](ci-cd.md). |
 | Registry | `ghcr.io/henriquezsergio728-tech/chamba-link-api` | Public, `linux/arm64` only. |
 
-The production VM is a single arm64 host. The domain `chambalink.online` is registered at GoDaddy, with DNS hosted on Cloudflare. Production runs `compose.yaml` and `compose.prod.yaml` together. See [Deployment](deployment.md).
+Production is two hosts. The application host, an arm64 VM.Standard.A1.Flex, runs nginx on the host and only the `api` container, from `compose.prod.yaml` with `deploy/app/compose.yaml`, with `DATABASE_URL` pointing at the database host. The database host, an x86_64 VM.Standard.E2.1.Micro, runs `deploy/db/compose.yaml`, which runs only Postgres and publishes 5432 on the host's private address (`DB_BIND_ADDR`). The domain `chambalink.online` is registered at GoDaddy, with DNS hosted on Cloudflare. See [Deployment](deployment.md#hosts) and [ADR 0012](decisions/0012-dedicated-database-host.md).
 
-The Compose files support two modes. In the single-host mode, `compose.yaml` and `compose.prod.yaml` run `db` and `api` on one host and the API reaches Postgres at `db:5432`. In the split mode, a database host runs `deploy/db/compose.yaml`, which runs only Postgres and publishes 5432 on the host's private address (`DB_BIND_ADDR`), and each application node runs `compose.prod.yaml` with `deploy/app/compose.yaml`, which runs only `api` with `DATABASE_URL` pointing at the database host. See [Deployment](deployment.md#database-host).
+`compose.yaml` with `compose.prod.yaml` also runs `db` and `api` together on one host, where the API reaches Postgres at `db:5432`. Production does not use that combination.
 
 ## Request path
 
 1. A client resolves `chambalink.online` or `www.chambalink.online` to Cloudflare addresses. `www` is a CNAME to the apex, and both records are proxied.
 2. Cloudflare terminates the client's TLS connection. With Always Use HTTPS on, Cloudflare answers plain HTTP requests with a `301` redirect to HTTPS.
-3. Cloudflare connects to the production VM on port 443 over IPv4 and validates the origin certificate (SSL/TLS mode Full (strict)).
+3. Cloudflare connects to the application host on port 443 over IPv4 and validates the origin certificate (SSL/TLS mode Full (strict)).
 4. nginx terminates TLS with a Cloudflare Origin CA certificate. For peers in Cloudflare's published ranges it replaces `$remote_addr` with the `CF-Connecting-IP` header (`deploy/nginx/cloudflare-real-ip.conf`).
 5. nginx proxies the request to `http://127.0.0.1:3000` with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set.
 6. Docker forwards `127.0.0.1:3000` to port 3000 of the `api` container, where Fastify listens on `0.0.0.0`. Fastify takes `request.ip` from `X-Forwarded-For` because its peer is in a loopback or private range (`trustProxy: "loopback,uniquelocal"`).
+7. For the account and session routes, the API queries Postgres over the private network at the database host's private address, port 5432, as set in `DATABASE_URL`. The connection is not encrypted with TLS.
 
-The API and the migrator reach Postgres through `DATABASE_URL`, on the Compose network host `db`. The API creates a `pg` connection pool at startup that opens connections only when a query runs. The account and session routes query Postgres; `GET /healthz` and `GET /v1/openapi.json` do not.
+The API and the migrator reach Postgres through `DATABASE_URL`. The API creates a `pg` connection pool at startup that opens connections only when a query runs. The account and session routes query Postgres; `GET /healthz` and `GET /v1/openapi.json` do not.
 
-The production VM has no IPv6 address. Cloudflare serves clients over IPv4 and IPv6 and reaches the origin over IPv4.
+The application host has no IPv6 address. Cloudflare serves clients over IPv4 and IPv6 and reaches the origin over IPv4.
 
 ## nginx
 
@@ -56,7 +61,7 @@ The production VM has no IPv6 address. Cloudflare serves clients over IPv4 and I
 - `ssl_certificate /etc/ssl/chambalink/origin.pem`, `ssl_certificate_key /etc/ssl/chambalink/origin.key`, `ssl_protocols TLSv1.2 TLSv1.3`.
 - One `location /` that proxies to `http://127.0.0.1:3000`.
 
-Port 80 is the `default_server`, so it answers plain HTTP for any `Host`. The host firewall blocks port 80 from outside the VM, so it is reachable on loopback only. Port 443 has no other server block, so nginx uses this one for every TLS connection on it.
+Port 80 is the `default_server`, so it answers plain HTTP for any `Host`. The host firewall blocks port 80 from outside the application host, so it is reachable on loopback only. Port 443 has no other server block, so nginx uses this one for every TLS connection on it.
 
 The file starts with `include /opt/chambalink/deploy/nginx/cloudflare-real-ip.conf;`, an absolute path into the clone. That file lists Cloudflare's IPv4 and IPv6 ranges as `set_real_ip_from` entries and sets `real_ip_header CF-Connecting-IP`. See [Deployment](deployment.md#cloudflare-real-ip-ranges) for how it is regenerated.
 
@@ -65,38 +70,39 @@ The file starts with `include /opt/chambalink/deploy/nginx/cloudflare-real-ip.co
 | Boundary | What is trusted | Mechanism |
 | --- | --- | --- |
 | Client to Cloudflare | Cloudflare's edge certificate | Managed by Cloudflare |
-| Network to origin | TCP 443 only from Cloudflare's IPv4 ranges; port 80 not reachable from outside | Host iptables `INPUT` rules on the VM, not in the repo. See [Deployment](deployment.md#firewall). |
+| Network to origin | TCP 443 only from Cloudflare's IPv4 ranges; port 80 not reachable from outside | Host iptables `INPUT` rules on the application host, not in the repo. See [Deployment](deployment.md#firewall). |
 | Cloudflare to nginx | The origin presents a certificate signed by Cloudflare Origin CA | SSL/TLS mode Full (strict) |
 | nginx visitor address | `CF-Connecting-IP`, only when the peer is in Cloudflare's ranges | `ngx_http_realip_module` with `cloudflare-real-ip.conf` |
 | Fastify client address | `X-Forwarded-For`, only when the peer is loopback or private | `trustProxy: "loopback,uniquelocal"` in `api/src/app.ts` |
-| Host to containers | Ports `3000` and `5432` bound to `127.0.0.1` | `compose.prod.yaml`, `compose.yaml` |
+| Host to containers | Port `3000` bound to `127.0.0.1` on the application host | `compose.prod.yaml` |
+| Application host to Postgres | TCP 5432 only from the `app-nodes` network security group, on the database host's private address, with the Postgres password; not TLS-encrypted | `DB_BIND_ADDR` in `deploy/db/compose.yaml`; network security groups in OCI, not in the repo. See [Deployment](deployment.md#private-network-access). |
 
-The host firewall accepts new TCP connections on 443 only from the 15 Cloudflare IPv4 ranges copied on 2026-10-22, and rejects them on 80 from outside the VM. It accepts port 22 from any address. A connection to 443 on the VM itself receives a certificate that only Cloudflare trusts.
+The host firewall on the application host accepts new TCP connections on 443 only from the 15 Cloudflare IPv4 ranges copied on 2026-10-22, and rejects them on 80 from outside the application host. It accepts port 22 from any address. A connection to 443 on the application host itself receives a certificate that only Cloudflare trusts.
 
 ## Network exposure
 
-| Port | Bound to | Process |
-| --- | --- | --- |
-| 22 | not defined in the repo | SSH; the host firewall accepts it from any address |
-| 80 | all interfaces (IPv4 and IPv6); reachable on loopback only | nginx on the host, plain HTTP |
-| 443 | all interfaces (IPv4 and IPv6); reachable from outside only from Cloudflare's IPv4 ranges | nginx on the host, TLS |
-| 3000 | `127.0.0.1` | `api` container (`compose.prod.yaml`) |
-| 5432 | `127.0.0.1` | `db` container (`compose.yaml`) |
+| Host | Port | Bound to | Process |
+| --- | --- | --- | --- |
+| Application | 22 | not defined in the repo | SSH; the host firewall accepts it from any address |
+| Application | 80 | all interfaces (IPv4 and IPv6); reachable on loopback only | nginx on the host, plain HTTP |
+| Application | 443 | all interfaces (IPv4 and IPv6); reachable from outside only from Cloudflare's IPv4 ranges | nginx on the host, TLS |
+| Application | 3000 | `127.0.0.1` | `api` container (`compose.prod.yaml`) |
+| Database | 5432 | the host's private address (`DB_BIND_ADDR`); reachable only from the `app-nodes` network security group | `db` container (`deploy/db/compose.yaml`) |
 
-Docker-published ports bypass the host's iptables `INPUT` rules, so both containers publish on loopback only.
+Docker-published ports bypass the host's iptables `INPUT` rules. The `api` container therefore publishes on loopback only, and 5432 is gated by the bind address, the network security groups and the Postgres password. The subnet's security list has no rule for 5432.
 
 ## Backups
 
-A systemd timer on the production host runs `ops/backup.sh` as root every six hours. It dumps the database with `pg_dump -Fc` through `docker compose exec -T db`, checks the archive with `pg_restore --list`, and uploads it with the OCI CLI, authenticated as the VM's instance principal, to a private, versioned Object Storage bucket, then compares the stored object's size with the dump's. Restores are manual. See [Deployment](deployment.md#backups) and [ADR 0011](decisions/0011-database-backups.md).
+A systemd timer on the database host runs `ops/backup.sh` as root every six hours; the application host has no backup timer. The script dumps the database with `pg_dump -Fc` through `docker compose exec -T db`, checks the archive with `pg_restore --list`, and uploads it with the OCI CLI, authenticated as the database host's instance principal, to a private, versioned Object Storage bucket, then compares the stored object's size with the dump's. Restores are manual; see [Restoring from a backup](deployment.md#restoring-from-a-backup). See [Deployment](deployment.md#backups) and [ADR 0011](decisions/0011-database-backups.md).
 
 ## Health checks
 
 | Service | Check | Defined in |
 | --- | --- | --- |
 | `api` | `fetch('http://127.0.0.1:3000/healthz')` inside the container, every 10 s | `Dockerfile` |
-| `db` | `pg_isready -U $POSTGRES_USER -d $POSTGRES_DB`, every 5 s | `compose.yaml` |
+| `db` | `pg_isready -U $POSTGRES_USER -d $POSTGRES_DB`, every 5 s | `compose.yaml`, `deploy/db/compose.yaml` |
 
-The `api` health check does not check database connectivity. In production, `api` starts only after `db` reports healthy (`depends_on` with `condition: service_healthy`).
+The `api` health check does not check database connectivity. In production, `api` and `db` run on different hosts, and `deploy/app/compose.yaml` removes the `depends_on` on `db`, so `api` starts without waiting for the database.
 
 ## API conventions
 
@@ -163,9 +169,10 @@ Recorded in [ADR 0010](decisions/0010-rate-limiting.md). `api/src/rate-limit.ts`
 | `HOST` | `api/src/server.ts` | `127.0.0.1` | Image sets `0.0.0.0` |
 | `LOG_LEVEL` | `api/src/server.ts` | Fastify's default, `info` | Unset in the image and Compose files; one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
 | `NODE_ENV` | `api/src/app.ts` (logging is off when `test`), `api/src/auth/session.ts` (the session cookie is `Secure` when `production`) | unset | Image sets `production` |
-| `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking, database plugin and auth tests | none | `.env` locally; in `compose.prod.yaml`, the `DATABASE_URL` variable when set, otherwise built from `POSTGRES_*` |
-| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `postgres:16` image, Compose interpolation | none | `.env` |
-| `API_TAG` | `compose.prod.yaml` image tag | required | Production `.env` |
-| `COMPOSE_FILE` | Docker Compose | `compose.yaml` | Production `.env` |
+| `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking, database plugin and auth tests | none | `.env` locally; in `compose.prod.yaml`, the `DATABASE_URL` variable when set, otherwise built from `POSTGRES_*`. Set in the application host's `.env` to the database host's private address |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `postgres:16` image, Compose interpolation | none | `.env` locally and on the database host |
+| `API_TAG` | `compose.prod.yaml` image tag | required | Application host `.env` |
+| `COMPOSE_FILE` | Docker Compose | `compose.yaml` | `compose.prod.yaml:deploy/app/compose.yaml` in the application host's `.env`; `deploy/db/compose.yaml` in the database host's `.env` |
+| `DB_BIND_ADDR` | `deploy/db/compose.yaml` port binding | required by that file | Database host `.env`: the host's private address |
 
 `compose.prod.yaml` places `POSTGRES_PASSWORD` inside a URL, so the password must contain only URL-safe characters.
