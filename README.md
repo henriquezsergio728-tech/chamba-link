@@ -12,7 +12,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 - A database-level guarantee that a provider cannot hold two overlapping non-cancelled bookings, covered by integration tests.
 - A container image for the API that also ships a programmatic migrator.
 - A GitHub Actions pipeline that typechecks, migrates and tests on every pull request, builds an arm64 image, runs its migrator against a fresh Postgres, smoke-tests it, and publishes it to GitHub Container Registry from `main`.
-- A production Compose overlay and an nginx config for a single VM that serves `chambalink.online` and `www.chambalink.online` behind the Cloudflare proxy, terminates TLS with a Cloudflare Origin CA certificate, and restores visitor addresses from `CF-Connecting-IP`.
+- Compose files for a two-host production setup, an application host that runs the API and a database host that runs Postgres on its private address, and an nginx config on the application host that serves `chambalink.online` and `www.chambalink.online` behind the Cloudflare proxy, terminates TLS with a Cloudflare Origin CA certificate, and restores visitor addresses from `CF-Connecting-IP`.
 - Client addresses taken from `X-Forwarded-For` when the API's peer is a loopback or private-network proxy, covered by tests.
 
 ## Repository layout
@@ -35,7 +35,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   ├── test/                 Vitest tests
 │   └── drizzle.config.ts     drizzle-kit configuration
 ├── deploy/
-│   ├── nginx/                nginx site config and Cloudflare real-IP ranges for the production VM
+│   ├── nginx/                nginx site config and Cloudflare real-IP ranges for the application host
 │   ├── db/compose.yaml       Postgres-only Compose project for a database host
 │   └── app/compose.yaml      Overlay that runs the API without a local database
 ├── ops/                      Database backup script and its systemd units
@@ -110,7 +110,7 @@ The booking, database plugin, auth and rate-limit tests need the database to be 
 - [Data model](docs/data-model.md): tables, the no-overlap guarantee, the append-only audit log, rate-limit counters and migrations
 - [Development](docs/development.md): toolchain, scripts, tests and contribution rules
 - [CI/CD](docs/ci-cd.md): the GitHub Actions pipeline and image registry
-- [Deployment](docs/deployment.md): production VM runbook
+- [Deployment](docs/deployment.md): production runbook for the application and database hosts
 - [Decisions](docs/decisions/): architecture decision records
   - [0001 Fastify on TypeScript and Node 24](docs/decisions/0001-fastify-typescript-node.md)
   - [0002 Drizzle with checked-in SQL migrations](docs/decisions/0002-drizzle-sql-migrations.md)
@@ -123,6 +123,7 @@ The booking, database plugin, auth and rate-limit tests need the database to be 
   - [0009 Accounts, password hashing, cookie sessions and audit log](docs/decisions/0009-accounts-and-sessions.md)
   - [0010 Rate limiting in Postgres](docs/decisions/0010-rate-limiting.md)
   - [0011 Logical database backups to Object Storage](docs/decisions/0011-database-backups.md)
+  - [0012 Dedicated database host](docs/decisions/0012-dedicated-database-host.md)
 
 ## License
 

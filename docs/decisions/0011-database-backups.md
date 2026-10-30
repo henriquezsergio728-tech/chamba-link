@@ -29,3 +29,7 @@ A manual drill on the production VM on 2026-10-25 produced a 17 KB dump in 0.33 
 - Restoring is manual.
 - An upload is verified by comparing sizes, not checksums.
 - A failed run is visible only in the systemd journal and the unit's state.
+
+## Note, 2026-10-29
+
+The backups run on the database host ([ADR 0012](0012-dedicated-database-host.md)), with the same script and units. Compose takes `COMPOSE_FILE` from the clone's `.env`, and `/etc/chambalink/backup.env` holds `BACKUP_BUCKET` and `OCI_CLI`. The application host has no backup timer. The sections above describe the single VM on which the backups first ran.
