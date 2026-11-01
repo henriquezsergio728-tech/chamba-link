@@ -168,6 +168,7 @@ Recorded in [ADR 0010](decisions/0010-rate-limiting.md). `api/src/rate-limit.ts`
 | `PORT` | `api/src/server.ts` | `3000`; must be an integer from 1 to 65535 | Image sets `3000` |
 | `HOST` | `api/src/server.ts` | `127.0.0.1` | Image sets `0.0.0.0` |
 | `LOG_LEVEL` | `api/src/server.ts` | Fastify's default, `info` | Unset in the image and Compose files; one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
+| `DB_POOL_MAX` | `api/src/server.ts`, passed to the pool in `api/src/db.ts` | `5`; must be an integer from 1 to 20 | Unset in the image and Compose files |
 | `NODE_ENV` | `api/src/app.ts` (logging is off when `test`), `api/src/auth/session.ts` (the session cookie is `Secure` when `production`) | unset | Image sets `production` |
 | `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking, database plugin and auth tests | none | `.env` locally; in `compose.prod.yaml`, the `DATABASE_URL` variable when set, otherwise built from `POSTGRES_*`. Set in the application host's `.env` to the database host's private address |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `postgres:16` image, Compose interpolation | none | `.env` locally and on the database host |

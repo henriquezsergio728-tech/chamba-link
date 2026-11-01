@@ -67,6 +67,7 @@ The server reads its configuration from the process environment and does not loa
 | `PORT` | No; integer from 1 to 65535 | `3000` |
 | `HOST` | No | `127.0.0.1` |
 | `LOG_LEVEL` | No; `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` | `info` |
+| `DB_POOL_MAX` | No; integer from 1 to 20, the maximum number of Postgres connections in the API's pool | `5` |
 
 To run it with the values from `.env`:
 

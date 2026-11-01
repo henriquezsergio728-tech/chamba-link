@@ -71,7 +71,7 @@ The application host's clone uses a read-only GitHub deploy key scoped to this r
 | `API_TAG` | Full commit SHA of a published image |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Database user, password (generated with `openssl rand -hex 24`) and name. `compose.prod.yaml` ignores them while `DATABASE_URL` is set; step 6 of [Moving the database to another host](#moving-the-database-to-another-host) builds `DATABASE_URL` from them |
 
-`compose.prod.yaml` passes `DATABASE_URL` to the `api` service and fails if `API_TAG` is unset. The database host's `.env` is described in [Database host](#database-host).
+`compose.prod.yaml` passes `DATABASE_URL` to the `api` service and fails if `API_TAG` is unset. It defines no other variable for the `api` service, so the container runs with the default `DB_POOL_MAX` of 5 even when `.env` sets it. The database host's `.env` is described in [Database host](#database-host).
 
 Check the file mode:
 

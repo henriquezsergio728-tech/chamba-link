@@ -44,6 +44,6 @@ A dump taken by the backup job on the arm64 host restored on the x86_64 host in 
 - The database host is a single point of failure. A lost host or volume is covered by the backups, with a recovery point of at most six hours ([ADR 0011](0011-database-backups.md)).
 - Traffic between the hosts on the private network is not encrypted with TLS; `deploy/db/compose.yaml` configures none.
 - The API connects as `POSTGRES_USER`, which the `postgres` image creates as a superuser and which owns the tables, so the API can drop or disable the `audit_log` trigger ([Data model](../data-model.md#audit_log)) and holds more privilege than its queries need.
-- `max_connections=50` bounds all connections. `api/src/db.ts` sets no pool size, so each API process opens up to node-postgres's default of 10 connections: 4 processes can use 40 of the 50 connections and 5 reach the limit, with the migrator, the backup job and `psql` sessions also counting against it.
+- `max_connections=50` bounds all connections. Each API process opens up to `DB_POOL_MAX` connections (default 5). A request waits at most 5 seconds to open a connection or for a free one when all are in use, and then fails. At the default, 8 processes use 40 of the 50 connections, leaving 10 for the migrator, the backup job and `psql` sessions.
 - The database host writes at about a third of the A1's rate (see [Measured evidence](#measured-evidence)).
 - Every query crosses the private network instead of a Docker bridge on the same host.
