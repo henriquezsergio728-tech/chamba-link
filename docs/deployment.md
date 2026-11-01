@@ -67,11 +67,12 @@ The application host's clone uses a read-only GitHub deploy key scoped to this r
 | Variable | Purpose |
 | --- | --- |
 | `COMPOSE_FILE` | `compose.prod.yaml:deploy/app/compose.yaml`, so every `docker compose` command in `/opt/chambalink` uses both files and runs only `api` |
-| `DATABASE_URL` | `postgres://<user>:<password>@<database host private address>:5432/<database>` |
+| `DATABASE_URL` | `postgres://chambalink_app:<password>@<database host private address>:5432/<database>`, the API's role; see [Database roles](#database-roles) |
+| `MIGRATE_DATABASE_URL` | `postgres://<owner user>:<owner password>@<database host private address>:5432/<database>`, the owner's URL, used only by the `migrate` service |
 | `API_TAG` | Full commit SHA of a published image |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Database user, password (generated with `openssl rand -hex 24`) and name. `compose.prod.yaml` ignores them while `DATABASE_URL` is set; step 6 of [Moving the database to another host](#moving-the-database-to-another-host) builds `DATABASE_URL` from them |
 
-`compose.prod.yaml` passes `DATABASE_URL` to the `api` service and fails if `API_TAG` is unset. It defines no other variable for the `api` service, so the container runs with the default `DB_POOL_MAX` of 5 even when `.env` sets it. The database host's `.env` is described in [Database host](#database-host).
+`compose.prod.yaml` passes `DATABASE_URL` to the `api` service and fails if `API_TAG` is unset. It defines no other variable for the `api` service, so the container runs with the default `DB_POOL_MAX` of 5 even when `.env` sets it. The `migrate` service, in the profile `migrate`, receives `MIGRATE_DATABASE_URL` as its `DATABASE_URL`; `docker compose up` does not start it. Compose interpolates that service even when the profile is not active, so every `docker compose` command in `/opt/chambalink` fails while `MIGRATE_DATABASE_URL` is unset. The database host's `.env` is described in [Database host](#database-host).
 
 Check the file mode:
 
@@ -174,7 +175,7 @@ docker compose up -d --wait
 
 ## Updating the running version
 
-This sequence runs on the application host. It has been executed once, when `db` and `api` ran on one host. Set `RELEASE_SHA` as above.
+This sequence runs on the application host. It has been executed once, when `db` and `api` ran on one host and the migrator ran as `docker compose run --rm --no-deps api node dist/migrate.js`. Set `RELEASE_SHA` as above.
 
 ```bash
 RELEASE_SHA=<full 40-character commit SHA>
@@ -183,7 +184,7 @@ git pull --ff-only
 sed -i "s/^API_TAG=.*/API_TAG=${RELEASE_SHA}/" .env
 grep '^API_TAG=' .env
 docker compose pull
-docker compose run --rm --no-deps api node dist/migrate.js
+docker compose run --rm migrate
 docker compose up -d --wait
 ```
 
@@ -193,7 +194,7 @@ When it was executed, `docker compose pull` also fetched a newer `postgres:16` i
 
 `git pull --ff-only` updates the Compose files and the nginx config in the working copy. nginx reads a changed config only after a reload; see [nginx](#nginx).
 
-With the application host's `COMPOSE_FILE`, `docker compose pull` fetches only the API image, and the migrator runs against the database host through `DATABASE_URL`.
+With the application host's `COMPOSE_FILE`, `docker compose pull` fetches only the API image, and `docker compose run --rm migrate` runs the migrator against the database host as the owner, through `MIGRATE_DATABASE_URL`.
 
 `API_TAG` pins the API image to one commit SHA. No rollback has been exercised.
 
@@ -482,7 +483,30 @@ Docker Compose reads these from `.env` in the directory where `docker compose` r
 
 The application host runs only the `api` service and reaches the database over the private network. It uses `compose.prod.yaml` with [`deploy/app/compose.yaml`](../deploy/app/compose.yaml), which removes the api's `depends_on` on `db`, and sets `DATABASE_URL`; see [Production environment](#production-environment).
 
-`compose.prod.yaml` uses `DATABASE_URL` when it is set and otherwise builds it from the `POSTGRES_*` variables for the `db` service. With this file list, `docker compose up -d --wait` starts only `api`, and `docker compose run --rm api node dist/migrate.js` runs the migrator against the database host. `deploy/app/compose.yaml` uses the `!reset` tag, which needs Docker Compose 2.24.0 or later.
+`compose.prod.yaml` uses `DATABASE_URL` when it is set and otherwise builds it from the `POSTGRES_*` variables for the `db` service. With this file list, `docker compose up -d --wait` starts only `api`, and `docker compose run --rm migrate` runs the migrator against the database host. `deploy/app/compose.yaml` uses the `!reset` tag, which needs Docker Compose 2.24.0 or later.
+
+## Database roles
+
+| Role | Created by | Used by |
+| --- | --- | --- |
+| `POSTGRES_USER` | The `postgres` image, as a superuser, when it initializes an empty volume | The `migrate` service through `MIGRATE_DATABASE_URL`; `ops/backup.sh` and `psql` through `docker compose exec db`. It owns every table |
+| `chambalink_app` | Migration `20261101043547_app-role`, as `NOLOGIN` | The `api` service through `DATABASE_URL` |
+
+`chambalink_app` has `USAGE` on schema `public` and per-table row privileges only: `INSERT` alone on `audit_log`, no `TRUNCATE` anywhere, and nothing on schema `drizzle`. A table created later has no privileges for the role until the migration that creates it grants them. See [ADR 0013](decisions/0013-least-privilege-database-role.md) for the grant per table.
+
+The migration does not give the role a login or a password; they are set on the database host, from `/opt/chambalink`, after the migration has run:
+
+```bash
+cd /opt/chambalink
+APP_PASSWORD=$(openssl rand -hex 24)
+{ printf '\\prompt app_password\n%s\n' "$APP_PASSWORD"; echo "ALTER ROLE chambalink_app WITH LOGIN PASSWORD :'app_password';"; } | docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f -'
+```
+
+Expected output: `ALTER ROLE`.
+
+- `printf` and `echo` are shell builtins, so the password appears in no process's argument list and not in the shell history. psql reads the script from standard input, and `\prompt` reads the next line of it into the variable `app_password`.
+- The server stores a SCRAM-SHA-256 hash of the password. The `ALTER ROLE` statement itself reaches the server in plain text, and a failing statement is written to the server log with its text.
+- `openssl rand -hex 24` produces only URL-safe characters. The same value goes into `DATABASE_URL` in the application host's `.env`.
 
 ## Restoring from a backup
 

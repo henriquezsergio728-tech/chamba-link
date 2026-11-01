@@ -40,5 +40,5 @@ The hash is stored as a PHC string, `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash
 - A stolen cookie is valid until its session expires or is logged out. Other sessions of the same account stay valid after a logout.
 - A request from a sibling subdomain of `chambalink.online` is not blocked by `SameSite=Lax`.
 - `emailSha256` is unsalted, so anyone with read access to `audit_log` can confirm a guessed email.
-- The trigger stops `UPDATE` and `DELETE` but not the table's owner. The API and the migrator both connect as `POSTGRES_USER` (`compose.prod.yaml`), which created and owns the table and can drop or disable the trigger or `TRUNCATE` the table, which row triggers do not fire on.
+- The trigger stops `UPDATE` and `DELETE` but not the table's owner. The migrator connects as `POSTGRES_USER`, which created and owns the table and can drop or disable the trigger or `TRUNCATE` the table, which row triggers do not fire on. The API connects as `chambalink_app`, which has only `INSERT` on `audit_log` ([ADR 0013](0013-least-privilege-database-role.md)).
 - The trigger exists only in the custom migration SQL, not in `schema.ts` or the drizzle-kit snapshots.
