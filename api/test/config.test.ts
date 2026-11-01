@@ -26,15 +26,16 @@ afterEach(() => {
 
 test("a valid environment is accepted and defaults are applied", () => {
   expect(run({ DATABASE_URL: url })).toEqual({
-    config: { databaseUrl: url, port: 3000, host: "127.0.0.1", logLevel: undefined },
+    config: { databaseUrl: url, port: 3000, host: "127.0.0.1", logLevel: undefined, poolMax: 5 },
     stderr: "",
     exit: undefined,
   });
-  expect(run({ DATABASE_URL: url, PORT: "8080", HOST: "0.0.0.0", LOG_LEVEL: "debug" }).config).toEqual({
+  expect(run({ DATABASE_URL: url, PORT: "8080", HOST: "0.0.0.0", LOG_LEVEL: "debug", DB_POOL_MAX: "12" }).config).toEqual({
     databaseUrl: url,
     port: 8080,
     host: "0.0.0.0",
     logLevel: "debug",
+    poolMax: 12,
   });
 });
 
@@ -63,4 +64,19 @@ test.each(["abc", "70000", "0", "3000x", "-1"])("PORT=%s exits 1 naming PORT wit
 
 test("an unknown LOG_LEVEL is rejected", () => {
   expect(run({ DATABASE_URL: url, LOG_LEVEL: "verbose" }).stderr).toContain("LOG_LEVEL: invalid");
+});
+
+test("DB_POOL_MAX defaults to 5 when unset or empty", () => {
+  expect(run({ DATABASE_URL: url }).config?.poolMax).toBe(5);
+  expect(run({ DATABASE_URL: url, DB_POOL_MAX: "" }).config?.poolMax).toBe(5);
+});
+
+test.each([["1", 1], ["5", 5], ["20", 20]])("DB_POOL_MAX=%s is accepted", (raw, expected) => {
+  expect(run({ DATABASE_URL: url, DB_POOL_MAX: raw }).config?.poolMax).toBe(expected);
+});
+
+test.each(["0", "21", "-1", "5.5", "abc", " 7x"])("DB_POOL_MAX=%j exits 1 naming DB_POOL_MAX", (raw) => {
+  const result = run({ DATABASE_URL: url, DB_POOL_MAX: raw });
+  expect(result.exit).toBe("exit 1");
+  expect(result.stderr).toBe("Invalid environment configuration:\n  DB_POOL_MAX: invalid\n");
 });

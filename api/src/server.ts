@@ -5,7 +5,7 @@ import { dbPlugin } from "./db.js";
 const config = loadServerConfig();
 const app = buildApp();
 if (config.logLevel) app.log.level = config.logLevel;
-app.register(dbPlugin, { connectionString: config.databaseUrl });
+app.register(dbPlugin, { connectionString: config.databaseUrl, poolMax: config.poolMax });
 
 // docker stop sends SIGTERM and kills the container 10 s later, so a shutdown that hangs gives up after 8 s.
 const SHUTDOWN_TIMEOUT_MS = 8_000;

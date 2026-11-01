@@ -2,6 +2,12 @@ import { Type, type Static, type TObject } from "typebox";
 import { Value } from "typebox/value";
 
 const DatabaseUrl = Type.String({ pattern: "^postgres(ql)?://" });
+const DbPoolMax = Type.Integer({ minimum: 1, maximum: 20 });
+
+export const DB_POOL_MAX_DEFAULT = 5;
+
+// Variables converted to numbers when they are all digits; anything else stays a string and fails the integer check.
+const INTEGER_VARIABLES = new Set(["PORT", "DB_POOL_MAX"]);
 
 // Read by dist/migrate.js, which only needs the database.
 export const MigrateEnv = Type.Object({
@@ -14,19 +20,20 @@ export const ServerEnv = Type.Object({
   PORT: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
   HOST: Type.Optional(Type.String({ minLength: 1 })),
   LOG_LEVEL: Type.Optional(Type.Union(["fatal", "error", "warn", "info", "debug", "trace", "silent"].map((level) => Type.Literal(level)))),
+  DB_POOL_MAX: Type.Optional(DbPoolMax),
 });
 
 export type ConfigProblem = { name: string; reason: "missing" | "invalid" };
 
 type Env = Record<string, string | undefined>;
 
-// Validates the variables named in the schema. An empty string counts as unset; PORT is converted only when it is all digits.
+// Validates the variables named in the schema. An empty string counts as unset; PORT and DB_POOL_MAX are converted only when they are all digits.
 export function readEnv<S extends TObject>(schema: S, env: Env): { ok: true; value: Static<S> } | { ok: false; problems: ConfigProblem[] } {
   const input: Record<string, unknown> = {};
   for (const name of Object.keys(schema.properties)) {
     const raw = env[name];
     if (raw === undefined || raw === "") continue;
-    input[name] = name === "PORT" && /^[0-9]+$/.test(raw) ? Number(raw) : raw;
+    input[name] = INTEGER_VARIABLES.has(name) && /^[0-9]+$/.test(raw) ? Number(raw) : raw;
   }
   if (Value.Check(schema, input)) return { ok: true, value: input as Static<S> };
 
@@ -61,6 +68,7 @@ export function loadServerConfig(env: Env = process.env) {
     port: value.PORT ?? 3000,
     host: value.HOST ?? "127.0.0.1",
     logLevel: value.LOG_LEVEL,
+    poolMax: value.DB_POOL_MAX ?? DB_POOL_MAX_DEFAULT,
   };
 }
 
