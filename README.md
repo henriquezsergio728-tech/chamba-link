@@ -124,6 +124,7 @@ The booking, database plugin, auth and rate-limit tests need the database to be 
   - [0010 Rate limiting in Postgres](docs/decisions/0010-rate-limiting.md)
   - [0011 Logical database backups to Object Storage](docs/decisions/0011-database-backups.md)
   - [0012 Dedicated database host](docs/decisions/0012-dedicated-database-host.md)
+  - [0013 Least-privilege database role](docs/decisions/0013-least-privilege-database-role.md)
 
 ## License
 

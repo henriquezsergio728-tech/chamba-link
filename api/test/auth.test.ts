@@ -1,9 +1,11 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { config } from "dotenv";
 import { DrizzleQueryError } from "drizzle-orm";
+import pg from "pg";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { dbPlugin } from "../src/db.js";
+import { asAppRole } from "./app-role.js";
 
 config({ path: "../.env" });
 
@@ -36,11 +38,14 @@ vi.mock("../src/auth/password.js", async (importOriginal) => {
 const PASSWORD = "correct horse battery";
 const accountIds: string[] = [];
 
+// The API runs as the restricted role, as in production. Setup, cleanup and checks that need more go through owner.
 function makeApp() {
   const app = buildApp();
-  app.register(dbPlugin, { connectionString: process.env.DATABASE_URL! });
+  app.register(dbPlugin, { connectionString: asAppRole(process.env.DATABASE_URL!) });
   return app;
 }
+
+const owner = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
 const app = makeApp();
 
@@ -57,11 +62,12 @@ const usedIps = new Set<string>();
 
 // Audit rows cannot be deleted; accounts cascade to their credentials and sessions. Rate-limit rows are deleted by key.
 afterAll(async () => {
-  await app.pg.query("DELETE FROM accounts WHERE id = ANY($1)", [accountIds]);
+  await owner.query("DELETE FROM accounts WHERE id = ANY($1)", [accountIds]);
   const keys = [...usedIps].flatMap((ip) => [`login:ip:${ip}`, `register:ip:${ip}`]);
   for (const email of usedEmails) keys.push(`login:email:${sha256(email)}`);
   await app.pg.query("DELETE FROM rate_limits WHERE key = ANY($1)", [keys]);
   await app.close();
+  await owner.end();
 });
 
 const remember = <T extends string>(set: Set<string>, value: T) => (set.add(value), value);
@@ -206,7 +212,7 @@ test("a failed registration leaves no account behind", async () => {
 test("an expired session is rejected", async () => {
   const c = client();
   await register(c);
-  await app.pg.query("UPDATE sessions SET expires_at = now() - interval '1 second' WHERE token_hash = $1", [sha256(token(c))]);
+  await owner.query("UPDATE sessions SET expires_at = now() - interval '1 second' WHERE token_hash = $1", [sha256(token(c))]);
   const me = await call(c, "GET", "/v1/me");
   expect(me.statusCode).toBe(401);
   expect(me.json()).toMatchObject({ code: "UNAUTHENTICATED" });
@@ -216,7 +222,7 @@ test("login deletes the account's expired sessions", async () => {
   const c = client();
   const email = randomEmail();
   const account = (await register(c, { email })).json().account;
-  await app.pg.query("UPDATE sessions SET expires_at = now() - interval '1 second' WHERE account_id = $1", [account.id]);
+  await owner.query("UPDATE sessions SET expires_at = now() - interval '1 second' WHERE account_id = $1", [account.id]);
   await call(client(), "POST", "/v1/auth/login", { email, password: PASSWORD });
   const { rows } = await app.pg.query("SELECT token_hash FROM sessions WHERE account_id = $1", [account.id]);
   expect(rows).toHaveLength(1);
@@ -291,7 +297,7 @@ test("auth responses, including errors, carry Cache-Control: no-store", async ()
 
 // Audit rows for one test are selected by its client address.
 async function auditRows(ip: string) {
-  const { rows } = await app.pg.query("SELECT id, event, actor_account_id, ip, request_id, metadata FROM audit_log WHERE ip = $1 ORDER BY id", [ip]);
+  const { rows } = await owner.query("SELECT id, event, actor_account_id, ip, request_id, metadata FROM audit_log WHERE ip = $1 ORDER BY id", [ip]);
   return rows;
 }
 
@@ -328,15 +334,15 @@ test("audit_log rejects UPDATE and DELETE", async () => {
   const c = client();
   await register(c);
   const [row] = await auditRows(c.ip);
-  await expect(app.pg.query("UPDATE audit_log SET event = 'tampered' WHERE id = $1", [row.id])).rejects.toThrow(/append-only/);
-  await expect(app.pg.query("DELETE FROM audit_log WHERE id = $1", [row.id])).rejects.toThrow(/append-only/);
+  await expect(owner.query("UPDATE audit_log SET event = 'tampered' WHERE id = $1", [row.id])).rejects.toThrow(/append-only/);
+  await expect(owner.query("DELETE FROM audit_log WHERE id = $1", [row.id])).rejects.toThrow(/append-only/);
   expect((await auditRows(c.ip))[0]).toEqual(row);
 });
 
 const login = (c: Client, email: string, password: string) => call(c, "POST", "/v1/auth/login", { email, password });
 
 async function rateLimitedRows(ips: string[]) {
-  const { rows } = await app.pg.query("SELECT ip, metadata FROM audit_log WHERE event = 'auth.rate_limited' AND ip = ANY($1) ORDER BY id", [ips]);
+  const { rows } = await owner.query("SELECT ip, metadata FROM audit_log WHERE event = 'auth.rate_limited' AND ip = ANY($1) ORDER BY id", [ips]);
   return rows;
 }
 
@@ -388,7 +394,7 @@ test("after 10 failed logins for one email, the next attempt is 429 even with th
   expect(late.every((c) => c.cookie === undefined)).toBe(true);
 
   // A login that reached password verification writes auth.login.failed or auth.login.succeeded; these wrote neither.
-  const { rows } = await app.pg.query("SELECT event FROM audit_log WHERE ip = ANY($1)", [late.map((c) => c.ip)]);
+  const { rows } = await owner.query("SELECT event FROM audit_log WHERE ip = ANY($1)", [late.map((c) => c.ip)]);
   expect(rows).toEqual([]);
 
   // The 10th failure wrote the only auth.rate_limited row, without the email or its hash.

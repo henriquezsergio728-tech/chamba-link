@@ -141,7 +141,7 @@ CREATE TRIGGER "audit_log_append_only" BEFORE UPDATE OR DELETE ON "audit_log"
 
 - Any `UPDATE` or `DELETE` that touches a row fails with SQLSTATE `42501` (`insufficient_privilege`) and the message `audit_log is append-only: UPDATE is not allowed` or `... DELETE ...`.
 - `TRUNCATE` does not fire row triggers and is not blocked.
-- The table's owner can drop or disable the trigger. See [ADR 0009](decisions/0009-accounts-and-sessions.md#consequences).
+- The table's owner can drop or disable the trigger and `TRUNCATE` the table. The API's role, `chambalink_app`, has only `INSERT` on `audit_log` and can do neither. See [ADR 0009](decisions/0009-accounts-and-sessions.md#consequences) and [ADR 0013](decisions/0013-least-privilege-database-role.md).
 - Like the booking constraints, the function and trigger exist only in the migration SQL, not in `schema.ts` or the snapshots.
 
 Because rows cannot be deleted, tests that write audit rows leave them in the database, and select them by the client address of the request that wrote them instead of counting rows.
@@ -197,7 +197,7 @@ Each migration is a directory `api/drizzle/<timestamp>_<name>/` holding `migrati
 | --- | --- | --- |
 | Local development and CI job `test` | `pnpm --filter @chamba/api exec drizzle-kit migrate` | `api/drizzle.config.ts`, which reads `DATABASE_URL` and loads `../.env` if present |
 | CI job `image` | `node dist/migrate.js` inside the built image, run twice against a fresh Postgres | `DATABASE_URL` set on `docker run` |
-| Production | `node dist/migrate.js` inside the API image | `DATABASE_URL` from `compose.prod.yaml` |
+| Production | `docker compose run --rm migrate`, which runs `node dist/migrate.js` inside the API image | `DATABASE_URL` set from `MIGRATE_DATABASE_URL` by the `migrate` service in `compose.prod.yaml` |
 
 `api/src/migrate.ts` uses the `drizzle-orm` node-postgres migrator with `migrationsFolder: './drizzle'`. The image includes `api/drizzle/` because it is listed in the `files` field of `api/package.json`. On success it prints `migrations applied`.
 
