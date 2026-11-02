@@ -33,3 +33,27 @@ test("register and login document the 429 response", async () => {
   }
   await app.close();
 });
+
+test("the provider routes require the session cookie and the catalog routes do not", async () => {
+  const app = buildApp();
+  const doc = (await app.inject({ method: "GET", url: "/v1/openapi.json" })).json();
+  const own = {
+    "/v1/providers/me/profile": ["get", "put"],
+    "/v1/providers/me/services": ["get", "post"],
+    "/v1/providers/me/services/{id}": ["patch", "delete"],
+    "/v1/providers/me/availability": ["get", "put"],
+    "/v1/providers/me/time-off": ["get", "post"],
+    "/v1/providers/me/time-off/{id}": ["delete"],
+  };
+  for (const [path, methods] of Object.entries(own)) {
+    for (const method of methods) expect(doc.paths[path][method].security).toEqual([{ cookieAuth: [] }]);
+  }
+  for (const path of ["/v1/services", "/v1/providers/{id}", "/v1/providers/{id}/slots"]) {
+    expect(doc.paths[path].get).toBeDefined();
+    expect(doc.paths[path].get.security).toBeUndefined();
+  }
+  // Nullable fields are type arrays, so Ajv's type coercion cannot turn a null into 0.
+  const price = doc.paths["/v1/providers/me/services"].post.requestBody.content["application/json"].schema.properties.priceFromCents;
+  expect(price.type).toEqual(["integer", "null"]);
+  await app.close();
+});

@@ -1,0 +1,1264 @@
+{
+  "version": "8",
+  "dialect": "postgres",
+  "id": "47d86c52-e0a9-44b2-bcdc-ff53e127e2ea",
+  "prevIds": [
+    "79f5f257-008d-4f90-b3ba-8446f40fe215"
+  ],
+  "ddl": [
+    {
+      "values": [
+        "provider",
+        "client"
+      ],
+      "name": "account_role",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": [
+        "pending",
+        "confirmed",
+        "cancelled"
+      ],
+      "name": "booking_status",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "account_credentials",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "accounts",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "audit_log",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "availability_rules",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "bookings",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "provider_profiles",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "rate_limits",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "services",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "sessions",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "time_off",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "account_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "account_credentials"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "email",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "account_credentials"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "password_hash",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "account_credentials"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "account_credentials"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "accounts"
+    },
+    {
+      "type": "account_role",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "role",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "accounts"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "display_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "accounts"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "accounts"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": {
+        "type": "always",
+        "name": "audit_log_id_seq",
+        "increment": "1",
+        "startWith": "1",
+        "minValue": "1",
+        "maxValue": "9223372036854775807",
+        "cache": 1,
+        "cycle": false
+      },
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "audit_log"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "audit_log"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "actor_account_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "audit_log"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "event",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "audit_log"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "ip",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "audit_log"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "request_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "audit_log"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'{}'",
+      "generated": null,
+      "identity": null,
+      "name": "metadata",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "audit_log"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "provider_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "availability_rules"
+    },
+    {
+      "type": "smallint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "weekday",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "availability_rules"
+    },
+    {
+      "type": "time",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "start_time",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "availability_rules"
+    },
+    {
+      "type": "time",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "end_time",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "availability_rules"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "bookings"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "provider_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "bookings"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "client_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "bookings"
+    },
+    {
+      "type": "tstzrange",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "during",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "bookings"
+    },
+    {
+      "type": "booking_status",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'pending'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "bookings"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "bookings"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "account_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "account_role",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'provider'",
+      "generated": null,
+      "identity": null,
+      "name": "role",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "headline",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "bio",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "department",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "municipality",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "whatsapp_e164",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "rate_limits"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "window_start",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "rate_limits"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "count",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "rate_limits"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "provider_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "title",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "description",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "category",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "price_from_cents",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "duration_minutes",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "true",
+      "generated": null,
+      "identity": null,
+      "name": "active",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "sessions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "account_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "sessions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "token_hash",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "sessions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "sessions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "expires_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "sessions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "time_off"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "provider_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "time_off"
+    },
+    {
+      "type": "tstzrange",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "during",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "time_off"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "time_off"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "window_start",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "rate_limits_window_start_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "rate_limits"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "provider_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "services_provider_id_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "created_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "services_created_at_id_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "account_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "sessions_account_id_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "sessions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "provider_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "during",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "gist",
+      "concurrently": false,
+      "name": "time_off_provider_id_during_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "time_off"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "account_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "accounts",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "account_credentials_account_id_accounts_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "account_credentials"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "provider_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "provider_profiles",
+      "columnsTo": [
+        "account_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "availability_rules_provider_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "availability_rules"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "provider_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "accounts",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "bookings_provider_id_accounts_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "bookings"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "client_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "accounts",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "bookings_client_id_accounts_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "bookings"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "account_id",
+        "role"
+      ],
+      "schemaTo": "public",
+      "tableTo": "accounts",
+      "columnsTo": [
+        "id",
+        "role"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "provider_profiles_account_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "provider_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "provider_profiles",
+      "columnsTo": [
+        "account_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "services_provider_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "account_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "accounts",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "sessions_account_id_accounts_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "sessions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "provider_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "provider_profiles",
+      "columnsTo": [
+        "account_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "time_off_provider_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "time_off"
+    },
+    {
+      "columns": [
+        "provider_id",
+        "weekday",
+        "start_time"
+      ],
+      "nameExplicit": false,
+      "name": "availability_rules_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "availability_rules"
+    },
+    {
+      "columns": [
+        "key",
+        "window_start"
+      ],
+      "nameExplicit": false,
+      "name": "rate_limits_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "rate_limits"
+    },
+    {
+      "columns": [
+        "account_id"
+      ],
+      "nameExplicit": false,
+      "name": "account_credentials_pkey",
+      "schema": "public",
+      "table": "account_credentials",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "accounts_pkey",
+      "schema": "public",
+      "table": "accounts",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "audit_log_pkey",
+      "schema": "public",
+      "table": "audit_log",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "bookings_pkey",
+      "schema": "public",
+      "table": "bookings",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "account_id"
+      ],
+      "nameExplicit": false,
+      "name": "provider_profiles_pkey",
+      "schema": "public",
+      "table": "provider_profiles",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "services_pkey",
+      "schema": "public",
+      "table": "services",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "sessions_pkey",
+      "schema": "public",
+      "table": "sessions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "time_off_pkey",
+      "schema": "public",
+      "table": "time_off",
+      "entityType": "pks"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "id",
+        "role"
+      ],
+      "nullsNotDistinct": false,
+      "name": "accounts_id_role_key",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "accounts"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "email"
+      ],
+      "nullsNotDistinct": false,
+      "name": "account_credentials_email_key",
+      "schema": "public",
+      "table": "account_credentials",
+      "entityType": "uniques"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "token_hash"
+      ],
+      "nullsNotDistinct": false,
+      "name": "sessions_token_hash_key",
+      "schema": "public",
+      "table": "sessions",
+      "entityType": "uniques"
+    },
+    {
+      "value": "\"email\" = lower(\"email\") AND char_length(\"email\") <= 254",
+      "name": "account_credentials_email_normalized",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "account_credentials"
+    },
+    {
+      "value": "\"weekday\" BETWEEN 0 AND 6",
+      "name": "availability_rules_weekday",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "availability_rules"
+    },
+    {
+      "value": "\"end_time\" > \"start_time\"",
+      "name": "availability_rules_end_after_start",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "availability_rules"
+    },
+    {
+      "value": "\"role\" = 'provider'",
+      "name": "provider_profiles_role_provider",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "value": "\"whatsapp_e164\" ~ '^\\+[1-9][0-9]{7,14}$'",
+      "name": "provider_profiles_whatsapp_e164",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "provider_profiles"
+    },
+    {
+      "value": "\"price_from_cents\" >= 0",
+      "name": "services_price_from_cents_nonnegative",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "value": "\"duration_minutes\" BETWEEN 30 AND 480 AND \"duration_minutes\" % 30 = 0",
+      "name": "services_duration_minutes_steps",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "services"
+    },
+    {
+      "value": "NOT isempty(\"during\") AND NOT lower_inf(\"during\") AND NOT upper_inf(\"during\")",
+      "name": "time_off_during_bounded",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "time_off"
+    }
+  ],
+  "renames": []
+}

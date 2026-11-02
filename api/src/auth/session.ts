@@ -70,3 +70,13 @@ export async function requireAccount(request: FastifyRequest) {
   }
   throw new AppError({ status: 401, code: "UNAUTHENTICATED", title: "Unauthorized", detail: "A valid session is required" });
 }
+
+// preHandler for routes of one role: 401 without a live session, 403 for an account of the other role.
+export function requireRole(role: Account["role"]) {
+  return async (request: FastifyRequest) => {
+    await requireAccount(request);
+    if (request.account!.role !== role) {
+      throw new AppError({ status: 403, code: "FORBIDDEN", title: "Forbidden", detail: `Only ${role} accounts can use this route` });
+    }
+  };
+}

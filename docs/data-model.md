@@ -20,6 +20,8 @@ The schema is defined in [`api/src/db/schema.ts`](../api/src/db/schema.ts) and c
 | `display_name` | `text` | Not null |
 | `created_at` | `timestamp with time zone` | Not null, default `now()` |
 
+`accounts_id_role_key` is `UNIQUE (id, role)`. It exists as the target of the composite foreign key from `provider_profiles`.
+
 ### `bookings`
 
 | Column | Type | Constraints |
@@ -77,6 +79,12 @@ The foreign keys do not check the `role` of the referenced account.
 | `auth.login.failed` | `null` | `{"emailSha256": ...}`, the hex SHA-256 of the lowercased email |
 | `auth.logout` | The session's account | `{}` |
 | `auth.rate_limited` | `null` | `{"scope": "login-ip" \| "login-email" \| "register-ip"}` |
+| `provider.profile.updated` | The provider | `{}` |
+| `provider.service.created`, `provider.service.updated`, `provider.service.deactivated` | The provider | `{"serviceId": ...}` |
+| `provider.availability.replaced` | The provider | `{}` |
+| `provider.time_off.created`, `provider.time_off.deleted` | The provider | `{"timeOffId": ...}` |
+
+Provider events hold ids only, never text the provider wrote. `provider.service.deactivated` is written only when the service was active.
 
 `auth.logout` is written only when the cookie named a session that was deleted. `auth.rate_limited` is written once per rate-limit key and window; see [ADR 0010](decisions/0010-rate-limiting.md#decision).
 
@@ -89,6 +97,82 @@ The foreign keys do not check the `role` of the referenced account.
 | `count` | `integer` | Not null |
 
 The primary key `rate_limits_pkey` is `(key, window_start)`. Each row counts the hits for one key in one fixed window. Keys are `login:ip:<client>`, `register:ip:<client>` and `login:email:<hex SHA-256 of the lowercased email>`, where `<client>` is an IPv4 address or an IPv6 /64 such as `2001:db8:0:1/64`. The API computes `window_start` from its own clock and increments `count` with `INSERT ... ON CONFLICT (key, window_start) DO UPDATE SET count = rate_limits.count + 1`. Rows whose `window_start` is more than 24 hours old are deleted by a sampled request; `rate_limits_window_start_idx` serves that deletion. See [ADR 0010](decisions/0010-rate-limiting.md).
+
+### `provider_profiles`
+
+| Column | Type | Constraints |
+| --- | --- | --- |
+| `account_id` | `uuid` | Primary key |
+| `role` | `account_role` | Not null, default `provider`, `provider_profiles_role_provider` |
+| `headline` | `text` | Not null |
+| `bio` | `text` | Not null |
+| `department` | `text` | Not null |
+| `municipality` | `text` | Not null |
+| `whatsapp_e164` | `text` | Nullable, `provider_profiles_whatsapp_e164` |
+| `created_at` | `timestamp with time zone` | Not null, default `now()` |
+| `updated_at` | `timestamp with time zone` | Not null, default `now()` |
+
+- `provider_profiles_account_fkey` is `FOREIGN KEY (account_id, role) REFERENCES accounts (id, role) ON DELETE CASCADE`, and `provider_profiles_role_provider` is `CHECK (role = 'provider')`. Together they allow a profile only for a provider account. See [ADR 0014](decisions/0014-scheduling-model.md#decision).
+- `provider_profiles_whatsapp_e164` is `CHECK (whatsapp_e164 ~ '^\+[1-9][0-9]{7,14}$')`.
+- `department` holds a department slug from `api/src/domain.ts`; the API validates it, the column does not.
+
+### `services`
+
+| Column | Type | Constraints |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key, default `gen_random_uuid()` |
+| `provider_id` | `uuid` | Not null, foreign key `services_provider_id_fkey` to `provider_profiles.account_id` `ON DELETE CASCADE`, index `services_provider_id_idx` |
+| `title` | `text` | Not null |
+| `description` | `text` | Not null |
+| `category` | `text` | Not null |
+| `price_from_cents` | `integer` | Nullable, `services_price_from_cents_nonnegative` (`>= 0`) |
+| `duration_minutes` | `integer` | Not null, `services_duration_minutes_steps` (30 to 480, a multiple of 30) |
+| `active` | `boolean` | Not null, default `true` |
+| `created_at` | `timestamp with time zone` | Not null, default `now()` |
+
+`services_created_at_id_idx` on `(created_at, id)` serves the catalog's keyset pagination. Deleting a service through the API sets `active` to `false`. Prices are in US dollar cents.
+
+### `availability_rules`
+
+| Column | Type | Constraints |
+| --- | --- | --- |
+| `provider_id` | `uuid` | Not null, foreign key `availability_rules_provider_id_fkey` to `provider_profiles.account_id` `ON DELETE CASCADE` |
+| `weekday` | `smallint` | Not null, `availability_rules_weekday` (0 to 6, 0 = Sunday) |
+| `start_time` | `time` | Not null |
+| `end_time` | `time` | Not null, `availability_rules_end_after_start` (`end_time > start_time`) |
+
+The primary key `availability_rules_pkey` is `(provider_id, weekday, start_time)`. Times are local wall-clock times in `America/El_Salvador`; `end_time` may be `24:00`. The migration adds an exclusion constraint that is not in `schema.ts`:
+
+```sql
+ALTER TABLE "availability_rules" ADD CONSTRAINT "availability_rules_no_overlap"
+  EXCLUDE USING gist ("provider_id" WITH =, "weekday" WITH =,
+    tsrange(DATE '2000-01-01' + "start_time", DATE '2000-01-01' + "end_time") WITH &&);
+```
+
+`time` has no built-in range type, so each rule is compared as a half-open `tsrange` on a fixed date; `date + time` is immutable, as an exclusion constraint requires. Rules that touch, such as `09:00-12:00` and `12:00-13:00`, do not overlap. A violation raises `23P01`.
+
+### `time_off`
+
+| Column | Type | Constraints |
+| --- | --- | --- |
+| `id` | `uuid` | Primary key, default `gen_random_uuid()` |
+| `provider_id` | `uuid` | Not null, foreign key `time_off_provider_id_fkey` to `provider_profiles.account_id` `ON DELETE CASCADE` |
+| `during` | `tstzrange` | Not null, `time_off_during_bounded` |
+| `created_at` | `timestamp with time zone` | Not null, default `now()` |
+
+`time_off_during_bounded` is the same check as `bookings_during_bounded`. The GiST index `time_off_provider_id_during_idx` on `(provider_id, during)` serves the overlap query of the slots route.
+
+### Privileges of `chambalink_app` on these tables
+
+Granted by migration `20261102225353_provider-catalog`, which creates the tables:
+
+| Table | Privileges |
+| --- | --- |
+| `provider_profiles` | `SELECT`, `INSERT`; `UPDATE` on `headline`, `bio`, `department`, `municipality`, `whatsapp_e164`, `updated_at` |
+| `services` | `SELECT`, `INSERT`; `UPDATE` on `title`, `description`, `category`, `price_from_cents`, `duration_minutes`, `active` |
+| `availability_rules` | `SELECT`, `INSERT`, `DELETE` |
+| `time_off` | `SELECT`, `INSERT`, `DELETE` |
+| `bookings` | `SELECT`, for the slots query |
 
 ## The `during` column
 
