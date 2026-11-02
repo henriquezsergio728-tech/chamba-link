@@ -5,7 +5,7 @@ import type { FastifyRequest } from "fastify";
 import { Type } from "typebox";
 import { audit } from "../audit.js";
 import { accountCredentials, accounts, sessions } from "../db/schema.js";
-import { AppError, describeError } from "../errors.js";
+import { AppError, describeError, pgError } from "../errors.js";
 import { clientKey, consume, peek, prune, RATE_LIMITS, reset, type Rule } from "../rate-limit.js";
 import { dummyHash, hashPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, verifyPassword } from "./password.js";
 import { type Account, clearSessionCookie, deleteExpiredSessions, hashToken, requireAccount, SESSION_COOKIE, startSession } from "./session.js";
@@ -57,13 +57,6 @@ const PRUNE_SAMPLE = 0.01;
 
 const invalidCredentials = () =>
   new AppError({ status: 401, code: "INVALID_CREDENTIALS", title: "Unauthorized", detail: "Invalid email or password" });
-
-// node-postgres errors may arrive wrapped by Drizzle; the SQLSTATE and constraint are on the innermost cause.
-function pgError(err: unknown): { code?: string; constraint?: string } {
-  let current = err as { code?: string; constraint?: string; cause?: unknown } | undefined;
-  while (current && current.code === undefined && current.cause) current = current.cause as typeof current;
-  return current ?? {};
-}
 
 export const authRoutes: FastifyPluginAsyncTypebox = async (app) => {
   // Responses carry account data or set a session cookie, so no cache may keep them. Error responses included.

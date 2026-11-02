@@ -36,6 +36,13 @@ export function describeError(err: unknown): unknown {
   };
 }
 
+// node-postgres errors may arrive wrapped by Drizzle; the SQLSTATE and constraint are on the innermost cause.
+export function pgError(err: unknown): { code?: string; constraint?: string } {
+  let current = err as { code?: string; constraint?: string; cause?: unknown } | undefined;
+  while (current && current.code === undefined && current.cause) current = current.cause as typeof current;
+  return current ?? {};
+}
+
 type Problem = { status: number; title: string; detail: string; code?: string; [extension: string]: unknown };
 
 // RFC 9457 problem details.

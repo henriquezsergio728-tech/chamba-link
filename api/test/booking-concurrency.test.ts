@@ -8,7 +8,9 @@ config({ path: '../.env' });
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 25 });
 const accountIds: string[] = [];
 
-const insertSql = 'INSERT INTO bookings (provider_id, client_id, during) VALUES ($1, $2, $3)';
+// The provider's one service fills service_id; a pending booking also needs expires_at.
+const insertSql = `INSERT INTO bookings (provider_id, client_id, service_id, during, expires_at)
+  VALUES ($1, $2, (SELECT id FROM services WHERE provider_id = $1), $3, now() + interval '1 day')`;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Creates and commits a fresh provider and client so tests never share rows.
@@ -17,10 +19,10 @@ async function createAccounts() {
     `INSERT INTO accounts (role, display_name) VALUES ('provider', 'concurrency provider'), ('client', 'concurrency client') RETURNING id, role`,
   );
   for (const row of rows) accountIds.push(row.id);
-  return {
-    provider: rows.find((row) => row.role === 'provider')!.id as string,
-    client: rows.find((row) => row.role === 'client')!.id as string,
-  };
+  const provider = rows.find((row) => row.role === 'provider')!.id as string;
+  await pool.query(`INSERT INTO provider_profiles (account_id, headline, bio, department, municipality) VALUES ($1, 'h', '', 'la-paz', 'm')`, [provider]);
+  await pool.query(`INSERT INTO services (provider_id, title, description, category, duration_minutes) VALUES ($1, 't', '', 'other', 60)`, [provider]);
+  return { provider, client: rows.find((row) => row.role === 'client')!.id as string };
 }
 
 // Resolves to null if the insert succeeded, otherwise the Postgres error code. Never rejects.

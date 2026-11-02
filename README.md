@@ -8,8 +8,11 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 
 - A Fastify API on Node 24 and TypeScript that serves `GET /healthz` and its generated OpenAPI document at `GET /v1/openapi.json`, returns errors as RFC 9457 problem details, tags every response with `x-request-id`, validates its environment at startup and shuts down cleanly on `SIGTERM`.
 - Email and password accounts with argon2id password hashes, 30-day cookie sessions stored as token hashes, an append-only audit log of registrations, logins and logouts, and Postgres-backed rate limits on registration and login, served at `POST /v1/auth/register`, `POST /v1/auth/login`, `POST /v1/auth/logout` and `GET /v1/me`.
-- A Postgres 16 schema, managed with Drizzle, with `accounts`, `account_credentials`, `sessions`, `audit_log` and `bookings` tables.
-- A database-level guarantee that a provider cannot hold two overlapping non-cancelled bookings, covered by integration tests.
+- Provider profiles, service catalogs, weekly availability and time off, managed by provider accounts under `/v1/providers/me`, with a WhatsApp `wa.me` link built from the provider's number.
+- A public catalog at `GET /v1/services` with category, department and title filters, keyset pagination and `ETag` caching, public provider pages at `GET /v1/providers/:id`, and free slots computed from availability, time off and bookings at `GET /v1/providers/:id/slots`, in the fixed timezone `America/El_Salvador`.
+- A Postgres 16 schema, managed with Drizzle, with `accounts`, `account_credentials`, `sessions`, `audit_log`, `rate_limits`, `provider_profiles`, `services`, `availability_rules`, `time_off` and `bookings` tables.
+- Bookings by client accounts at `POST /v1/bookings`, held for the provider to confirm for up to 24 hours, with confirm, decline, cancel and complete transitions, a per-client rate limit, and a WhatsApp `wa.me` link to the provider with the booking's reference.
+- A database-level guarantee that a provider cannot hold two overlapping pending, confirmed or completed bookings, covered by integration tests, with lapsed holds expired in the transaction that inserts the next booking.
 - A container image for the API that also ships a programmatic migrator.
 - A GitHub Actions pipeline that typechecks, migrates and tests on every pull request, builds an arm64 image, runs its migrator against a fresh Postgres, smoke-tests it, and publishes it to GitHub Container Registry from `main`.
 - Compose files for a two-host production setup, an application host that runs the API and a database host that runs Postgres on its private address, and an nginx config on the application host that serves `chambalink.online` and `www.chambalink.online` behind the Cloudflare proxy, terminates TLS with a Cloudflare Origin CA certificate, and restores visitor addresses from `CF-Connecting-IP`.
@@ -29,6 +32,13 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   │   ├── audit.ts          Audit log writer
 │   │   ├── rate-limit.ts     Fixed-window rate limits stored in Postgres
 │   │   ├── auth/             Password hashing, sessions and account routes
+│   │   ├── providers/        Provider profile, services, availability and time-off routes
+│   │   ├── catalog/          Public catalog, provider page and slot routes, slot algorithm, cache headers
+│   │   ├── bookings/         Booking routes, transitions and the expiry of lapsed holds
+│   │   ├── domain.ts         Fixed values: timezone, currency, categories, departments, slot rules
+│   │   ├── time.ts           Local time conversion at the fixed UTC-6 offset
+│   │   ├── pagination.ts     Keyset cursors
+│   │   ├── schemas.ts        Shared TypeBox schemas
 │   │   ├── migrate.ts        Programmatic migrator
 │   │   └── db/schema.ts      Drizzle schema
 │   ├── drizzle/              Generated and custom SQL migrations
@@ -103,7 +113,7 @@ pnpm typecheck
 pnpm test
 ```
 
-The booking, database plugin, auth and rate-limit tests need the database to be running and migrated.
+The booking, database plugin, auth, rate-limit, provider, catalog and bookings route tests need the database to be running and migrated.
 
 ## Documentation
 
@@ -126,6 +136,7 @@ The booking, database plugin, auth and rate-limit tests need the database to be 
   - [0011 Logical database backups to Object Storage](docs/decisions/0011-database-backups.md)
   - [0012 Dedicated database host](docs/decisions/0012-dedicated-database-host.md)
   - [0013 Least-privilege database role](docs/decisions/0013-least-privilege-database-role.md)
+  - [0014 Scheduling model](docs/decisions/0014-scheduling-model.md)
 
 ## License
 

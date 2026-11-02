@@ -1,5 +1,23 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, customType, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  check,
+  customType,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  smallint,
+  text,
+  time,
+  timestamp,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 // A Postgres tstzrange, passed through in its text form, e.g. '[2026-11-02 09:00+00,2026-11-02 10:00+00)'.
 export const tstzrange = customType<{ data: string; driverData: string }>({
@@ -9,14 +27,19 @@ export const tstzrange = customType<{ data: string; driverData: string }>({
 });
 
 export const accountRole = pgEnum('account_role', ['provider', 'client']);
-export const bookingStatus = pgEnum('booking_status', ['pending', 'confirmed', 'cancelled']);
+export const bookingStatus = pgEnum('booking_status', ['pending', 'confirmed', 'declined', 'cancelled', 'expired', 'completed']);
 
-export const accounts = pgTable('accounts', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  role: accountRole('role').notNull(),
-  displayName: text('display_name').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+// accounts_id_role_key is the target of provider_profiles' composite foreign key, which limits profiles to providers.
+export const accounts = pgTable(
+  'accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    role: accountRole('role').notNull(),
+    displayName: text('display_name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique('accounts_id_role_key').on(t.id, t.role)],
+);
 
 // Kept apart from accounts so that a query on accounts never selects a password hash.
 export const accountCredentials = pgTable(
@@ -65,11 +88,105 @@ export const rateLimits = pgTable(
   (t) => [primaryKey({ columns: [t.key, t.windowStart] }), index('rate_limits_window_start_idx').on(t.windowStart)],
 );
 
-export const bookings = pgTable('bookings', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  providerId: uuid('provider_id').notNull().references(() => accounts.id),
-  clientId: uuid('client_id').notNull().references(() => accounts.id),
-  during: tstzrange('during').notNull(),
-  status: bookingStatus('status').notNull().default('pending'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+
+// role is always 'provider': with the composite foreign key to accounts (id, role), only a provider account can have a profile.
+export const providerProfiles = pgTable(
+  'provider_profiles',
+  {
+    accountId: uuid('account_id').primaryKey(),
+    role: accountRole('role').notNull().default('provider'),
+    headline: text('headline').notNull(),
+    bio: text('bio').notNull(),
+    department: text('department').notNull(),
+    municipality: text('municipality').notNull(),
+    whatsappE164: text('whatsapp_e164'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'provider_profiles_account_fkey', columns: [t.accountId, t.role], foreignColumns: [accounts.id, accounts.role] }).onDelete('cascade'),
+    check('provider_profiles_role_provider', sql`${t.role} = 'provider'`),
+    check('provider_profiles_whatsapp_e164', sql`${t.whatsappE164} ~ '^\\+[1-9][0-9]{7,14}$'`),
+  ],
+);
+
+// Deactivated services keep their row, so bookings can keep referencing them.
+export const services = pgTable(
+  'services',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    providerId: uuid('provider_id').notNull(),
+    title: text('title').notNull(),
+    description: text('description').notNull(),
+    category: text('category').notNull(),
+    priceFromCents: integer('price_from_cents'),
+    durationMinutes: integer('duration_minutes').notNull(),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'services_provider_id_fkey', columns: [t.providerId], foreignColumns: [providerProfiles.accountId] }).onDelete('cascade'),
+    check('services_price_from_cents_nonnegative', sql`${t.priceFromCents} >= 0`),
+    check('services_duration_minutes_steps', sql`${t.durationMinutes} BETWEEN 30 AND 480 AND ${t.durationMinutes} % 30 = 0`),
+    index('services_provider_id_idx').on(t.providerId),
+    index('services_created_at_id_idx').on(t.createdAt, t.id),
+  ],
+);
+
+// Weekly rules in local wall-clock time. availability_rules_no_overlap (custom SQL in the migration) rejects
+// overlapping rules for one provider and weekday.
+export const availabilityRules = pgTable(
+  'availability_rules',
+  {
+    providerId: uuid('provider_id').notNull(),
+    weekday: smallint('weekday').notNull(),
+    startTime: time('start_time').notNull(),
+    endTime: time('end_time').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.providerId, t.weekday, t.startTime] }),
+    foreignKey({ name: 'availability_rules_provider_id_fkey', columns: [t.providerId], foreignColumns: [providerProfiles.accountId] }).onDelete('cascade'),
+    check('availability_rules_weekday', sql`${t.weekday} BETWEEN 0 AND 6`),
+    check('availability_rules_end_after_start', sql`${t.endTime} > ${t.startTime}`),
+  ],
+);
+
+export const timeOff = pgTable(
+  'time_off',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    providerId: uuid('provider_id').notNull(),
+    during: tstzrange('during').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'time_off_provider_id_fkey', columns: [t.providerId], foreignColumns: [providerProfiles.accountId] }).onDelete('cascade'),
+    check('time_off_during_bounded', sql`NOT isempty(${t.during}) AND NOT lower_inf(${t.during}) AND NOT upper_inf(${t.during})`),
+    index('time_off_provider_id_during_idx').using('gist', t.providerId, t.during),
+  ],
+);
+
+// expires_at is when a pending booking lapses. bookings_no_provider_overlap (custom SQL) cannot depend on the time, so
+// lapsed rows stay 'pending' until the API marks them 'expired'; see ADR 0014.
+export const bookings = pgTable(
+  'bookings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    providerId: uuid('provider_id').notNull().references(() => accounts.id),
+    clientId: uuid('client_id').notNull().references(() => accounts.id),
+    serviceId: uuid('service_id').notNull(),
+    during: tstzrange('during').notNull(),
+    status: bookingStatus('status').notNull().default('pending'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    clientNote: text('client_note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'bookings_service_id_fkey', columns: [t.serviceId], foreignColumns: [services.id] }),
+    check('bookings_client_note_length', sql`char_length(${t.clientNote}) <= 500`),
+    check('bookings_pending_expires', sql`${t.status} <> 'pending' OR ${t.expiresAt} IS NOT NULL`),
+    index('bookings_client_id_created_at_idx').on(t.clientId, t.createdAt, t.id),
+    index('bookings_provider_id_created_at_idx').on(t.providerId, t.createdAt, t.id),
+  ],
+);

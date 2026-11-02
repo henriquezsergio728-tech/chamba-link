@@ -9,6 +9,7 @@ export const RATE_LIMITS = {
   LOGIN_IP: { limit: 30, windowSeconds: 900 },
   LOGIN_EMAIL: { limit: 10, windowSeconds: 900 },
   REGISTER_IP: { limit: 10, windowSeconds: 3600 },
+  BOOKING_CLIENT: { limit: 20, windowSeconds: 3600 },
 } as const satisfies Record<string, Rule>;
 
 const PRUNE_AFTER_MS = 24 * 60 * 60 * 1000;

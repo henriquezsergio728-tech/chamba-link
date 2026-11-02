@@ -6,7 +6,10 @@ import Fastify from "fastify";
 import { Type } from "typebox";
 import { authRoutes } from "./auth/routes.js";
 import { authPlugin } from "./auth/session.js";
+import { bookingRoutes } from "./bookings/routes.js";
+import { catalogRoutes } from "./catalog/routes.js";
 import { registerErrorHandlers } from "./errors.js";
+import { providerRoutes } from "./providers/routes.js";
 
 // Only ids that are safe to write into logs are accepted from the client.
 const REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/;
@@ -51,6 +54,9 @@ export function buildApp() {
     async (v1) => {
       v1.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
       v1.register(authRoutes);
+      v1.register(providerRoutes);
+      v1.register(catalogRoutes);
+      v1.register(bookingRoutes);
     },
     { prefix: "/v1" },
   );
