@@ -38,6 +38,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   ├── nginx/                nginx site config and Cloudflare real-IP ranges for the application host
 │   ├── db/compose.yaml       Postgres-only Compose project for a database host
 │   └── app/compose.yaml      Overlay that runs the API without a local database
+├── load/                     k6 load scripts and their README
 ├── ops/                      Database backup script and its systemd units
 ├── docs/                     Project documentation and ADRs
 ├── .github/
