@@ -16,10 +16,17 @@ export type AuditEvent =
   | "provider.service.deactivated"
   | "provider.availability.replaced"
   | "provider.time_off.created"
-  | "provider.time_off.deleted";
+  | "provider.time_off.deleted"
+  | "booking.created"
+  | "booking.confirmed"
+  | "booking.declined"
+  | "booking.cancelled"
+  | "booking.completed"
+  | "booking.expired"
+  | "booking.rate_limited";
 
 // Appends one row to audit_log. Callers must not pass passwords, tokens or the raw email of an unknown account.
-// Provider events carry ids only in metadata, never text the provider wrote.
+// Provider and booking events carry ids only in metadata, never text a provider or client wrote.
 export async function audit(
   db: Queryable,
   entry: { event: AuditEvent; actorAccountId?: string | null; ip?: string | null; requestId?: string | null; metadata?: Record<string, unknown> },

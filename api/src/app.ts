@@ -6,6 +6,7 @@ import Fastify from "fastify";
 import { Type } from "typebox";
 import { authRoutes } from "./auth/routes.js";
 import { authPlugin } from "./auth/session.js";
+import { bookingRoutes } from "./bookings/routes.js";
 import { catalogRoutes } from "./catalog/routes.js";
 import { registerErrorHandlers } from "./errors.js";
 import { providerRoutes } from "./providers/routes.js";
@@ -55,6 +56,7 @@ export function buildApp() {
       v1.register(authRoutes);
       v1.register(providerRoutes);
       v1.register(catalogRoutes);
+      v1.register(bookingRoutes);
     },
     { prefix: "/v1" },
   );

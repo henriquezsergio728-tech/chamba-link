@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, or, sql } from "drizzle-orm";
 import type { Queryable } from "../audit.js";
 import { availabilityRules, bookings, timeOff } from "../db/schema.js";
 import { tstzrangeLiteral, parseClock } from "../time.js";
@@ -25,11 +25,16 @@ export async function loadTimeOff(db: Queryable, providerId: string, from: Date,
     .where(and(eq(timeOff.providerId, providerId), sql`${timeOff.during} && ${tstzrangeLiteral(from, to)}::tstzrange`));
 }
 
-// The provider's bookings that overlap [from, to) and hold their slot: every status but cancelled, the same rows
-// that bookings_no_provider_overlap compares.
-export async function loadBlockingBookings(db: Queryable, providerId: string, from: Date, to: Date): Promise<Interval[]> {
+// The bookings that hold their slot at `now`: confirmed and completed ones, and pending ones that have not lapsed.
+// bookings_no_provider_overlap also counts lapsed pending rows, because its predicate cannot depend on the time;
+// expireLapsed marks them expired before a booking is inserted, so both agree on what is free.
+export const holdsSlot = (now: Date) =>
+  or(inArray(bookings.status, ["confirmed", "completed"]), and(eq(bookings.status, "pending"), gt(bookings.expiresAt, now)));
+
+// The provider's bookings that overlap [from, to) and hold their slot at `now`.
+export async function loadBlockingBookings(db: Queryable, providerId: string, from: Date, to: Date, now: Date): Promise<Interval[]> {
   return db
     .select(bounds(bookings.during))
     .from(bookings)
-    .where(and(eq(bookings.providerId, providerId), ne(bookings.status, "cancelled"), sql`${bookings.during} && ${tstzrangeLiteral(from, to)}::tstzrange`));
+    .where(and(eq(bookings.providerId, providerId), holdsSlot(now), sql`${bookings.during} && ${tstzrangeLiteral(from, to)}::tstzrange`));
 }

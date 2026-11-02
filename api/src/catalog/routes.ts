@@ -190,7 +190,7 @@ export const catalogRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const [rules, off, booked] = await Promise.all([
         loadRules(app.db, request.params.id),
         loadTimeOff(app.db, request.params.id, from, until),
-        loadBlockingBookings(app.db, request.params.id, from, until),
+        loadBlockingBookings(app.db, request.params.id, from, until, now),
       ]);
       const slots = computeSlots({ rules, blocked: [...off, ...booked], durationMinutes: service.durationMinutes, from, to, now });
       return {

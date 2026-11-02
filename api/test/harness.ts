@@ -52,10 +52,12 @@ export function harness() {
   }
 
   // Bookings reference accounts and services without cascading, so they go first; deleting an account cascades to
-  // its credentials, sessions, profile, services, availability and time off. Audit rows remain by design.
+  // its credentials, sessions, profile, services, availability and time off. Booking rate-limit rows are deleted by
+  // key. Audit rows remain by design.
   async function close() {
     await owner.query("DELETE FROM bookings WHERE provider_id = ANY($1) OR client_id = ANY($1)", [accountIds]);
     await owner.query("DELETE FROM accounts WHERE id = ANY($1)", [accountIds]);
+    await owner.query("DELETE FROM rate_limits WHERE key = ANY($1)", [accountIds.map((id) => `booking:account:${id}`)]);
     await app.close();
     await owner.end();
   }

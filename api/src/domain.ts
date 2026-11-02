@@ -38,6 +38,9 @@ export const SERVICE_DURATION_MAX_MINUTES = 480;
 export const BOOKING_MIN_LEAD_MINUTES = 60;
 export const BOOKING_HORIZON_DAYS = 60;
 
+// A pending booking lapses this long after creation, or at its start time if that comes sooner.
+export const PENDING_HOLD_HOURS = 24;
+
 // The longest range GET /v1/providers/:id/slots answers for.
 export const SLOTS_MAX_RANGE_DAYS = 14;
 

@@ -226,13 +226,10 @@ describe("GET /v1/providers/:id/slots", () => {
     await h.call(provider, "POST", "/v1/providers/me/time-off", { start: local(540).toISOString(), end: local(600).toISOString() });
     const client = await h.actor("client");
     const insertBooking = (start: number, status: string) =>
-      h.owner.query("INSERT INTO bookings (provider_id, client_id, during, status) VALUES ($1, $2, tstzrange($3, $4), $5)", [
-        provider.id,
-        client.id,
-        local(start),
-        local(start + 60),
-        status,
-      ]);
+      h.owner.query(
+        "INSERT INTO bookings (provider_id, client_id, service_id, during, status, expires_at) VALUES ($1, $2, $3, tstzrange($4, $5), $6, now() + interval '1 day')",
+        [provider.id, client.id, service.id, local(start), local(start + 60), status],
+      );
     // 11:00-12:00 removes 10:30 and 11:00; 10:00-11:00 only touches it and stays.
     await insertBooking(660, "pending");
     await insertBooking(480, "cancelled");

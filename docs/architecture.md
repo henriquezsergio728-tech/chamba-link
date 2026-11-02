@@ -26,7 +26,7 @@ flowchart LR
 
 | Component | Source | Notes |
 | --- | --- | --- |
-| API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz`, `GET /v1/openapi.json`, the account and session routes, and the provider and catalog routes. See [API conventions](#api-conventions), [Accounts and sessions](#accounts-and-sessions) and [Providers and catalog](#providers-and-catalog). |
+| API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz`, `GET /v1/openapi.json`, the account and session routes, the provider and catalog routes, and the booking routes. See [API conventions](#api-conventions), [Accounts and sessions](#accounts-and-sessions), [Providers and catalog](#providers-and-catalog) and [Bookings](#bookings). |
 | Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. In production it runs as the `migrate` service in `compose.prod.yaml`, connected as the table owner; the API connects as `chambalink_app`. See [ADR 0013](decisions/0013-least-privilege-database-role.md). |
 | Database | `deploy/db/compose.yaml` in production, `compose.yaml` locally | `postgres:16` pinned to a digest, with the named volume `pgdata`. In production, started with `max_connections=50`, `shared_buffers=128MB` and `effective_cache_size=384MB`. |
 | Edge proxy | Cloudflare (Free plan) | DNS for `chambalink.online`; proxies the apex and `www`. Configured in the Cloudflare dashboard, not in the repo. |
@@ -46,9 +46,9 @@ Production is two hosts. The application host, an arm64 VM.Standard.A1.Flex, run
 4. nginx terminates TLS with a Cloudflare Origin CA certificate. For peers in Cloudflare's published ranges it replaces `$remote_addr` with the `CF-Connecting-IP` header (`deploy/nginx/cloudflare-real-ip.conf`).
 5. nginx proxies the request to `http://127.0.0.1:3000` with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set.
 6. Docker forwards `127.0.0.1:3000` to port 3000 of the `api` container, where Fastify listens on `0.0.0.0`. Fastify takes `request.ip` from `X-Forwarded-For` because its peer is in a loopback or private range (`trustProxy: "loopback,uniquelocal"`).
-7. For the account, session, provider and catalog routes, the API queries Postgres over the private network at the database host's private address, port 5432, as set in `DATABASE_URL`. The connection is not encrypted with TLS.
+7. For the account, session, provider, catalog and booking routes, the API queries Postgres over the private network at the database host's private address, port 5432, as set in `DATABASE_URL`. The connection is not encrypted with TLS.
 
-The API and the migrator reach Postgres through `DATABASE_URL`. The API creates a `pg` connection pool at startup that opens connections only when a query runs. The account, session, provider and catalog routes query Postgres; `GET /healthz` and `GET /v1/openapi.json` do not.
+The API and the migrator reach Postgres through `DATABASE_URL`. The API creates a `pg` connection pool at startup that opens connections only when a query runs. The account, session, provider, catalog and booking routes query Postgres; `GET /healthz` and `GET /v1/openapi.json` do not.
 
 The application host has no IPv6 address. Cloudflare serves clients over IPv4 and IPv6 and reaches the origin over IPv4.
 
@@ -150,13 +150,14 @@ Recorded in [ADR 0010](decisions/0010-rate-limiting.md). `api/src/rate-limit.ts`
 | `REGISTER_IP` | `POST /v1/auth/register`, per client address | 10 per hour |
 | `LOGIN_IP` | `POST /v1/auth/login`, per client address | 30 per 15 minutes |
 | `LOGIN_EMAIL` | Failed `POST /v1/auth/login` attempts, per lowercased email | 10 per 15 minutes |
+| `BOOKING_CLIENT` | `POST /v1/bookings`, per client account | 20 per hour |
 
 - The client address is `request.ip`; an IPv6 address counts by its /64, and an IPv4-mapped IPv6 address as IPv4.
 - Requests rejected by schema validation are not counted.
 - Login checks the email's failure count before any password work, counts a failure after a wrong password or unknown email, and resets the count after a successful login.
 - If a limiter query fails, the error is logged as `rate limiter failed` without query parameters and the request proceeds as if allowed.
-- One in a hundred requests to these routes also deletes rate-limit rows older than 24 hours, without waiting for the result.
-- `auth.rate_limited` is written to `audit_log` once per key and window.
+- One in a hundred requests to the account and session routes also deletes rate-limit rows older than 24 hours, of every rule, without waiting for the result.
+- `auth.rate_limited`, or `booking.rate_limited` for `BOOKING_CLIENT`, is written to `audit_log` once per key and window.
 
 
 ## Providers and catalog
@@ -186,6 +187,26 @@ Recorded in [ADR 0014](decisions/0014-scheduling-model.md). The routes are in `a
 - `GET /v1/providers/:id` includes `whatsappLink`, a `wa.me` link with a prefilled message, when the provider stored a number, otherwise `null`.
 - `GET /v1/providers/:id/slots` takes `serviceId`, `from` and `to`, at most 14 days apart, and returns the free starts of that service in 30-minute steps, from one hour to 60 days ahead. See [ADR 0014](decisions/0014-scheduling-model.md#decision) for the algorithm.
 - Changes to profiles, services, availability and time off write `provider.*` audit events with ids only. See [Data model](data-model.md#audit_log).
+
+## Bookings
+
+Recorded in [ADR 0014](decisions/0014-scheduling-model.md). The routes are in `api/src/bookings/routes.ts` and appear in the OpenAPI document. Every response from them, including errors, carries `Cache-Control: no-store`.
+
+| Route | Auth | Success | Errors |
+| --- | --- | --- | --- |
+| `POST /v1/bookings` | Client | `201 {booking, whatsappLink}` | `400`, `401`, `403`, `404 NOT_FOUND`, `409 SLOT_TAKEN`, `422 START_MISALIGNED`, `422 OUTSIDE_HORIZON`, `422 OUTSIDE_AVAILABILITY`, `422 TIME_OFF`, `429 RATE_LIMITED` |
+| `GET /v1/bookings` | Any account | `200 {bookings, nextCursor}` | `400`, `400 INVALID_CURSOR`, `401` |
+| `GET /v1/bookings/:id` | A party | `200 {booking}` | `400`, `401`, `404 NOT_FOUND` |
+| `POST /v1/bookings/:id/confirm` | The provider | `200 {booking}` | `400`, `401`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409 INVALID_TRANSITION` |
+| `POST /v1/bookings/:id/decline` | The provider | `200 {booking}` | `400`, `401`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409 INVALID_TRANSITION` |
+| `POST /v1/bookings/:id/cancel` | A party | `200 {booking}` | `400`, `401`, `404 NOT_FOUND`, `409 INVALID_TRANSITION` |
+| `POST /v1/bookings/:id/complete` | The provider | `200 {booking}` | `400`, `401`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409 INVALID_TRANSITION` |
+
+- `booking` is `{id, reference, status, serviceId, serviceTitle, providerId, clientId, start, end, expiresAt, clientNote, createdAt, updatedAt}`. A pending booking whose hold has lapsed is reported with `status` `expired`.
+- `POST /v1/bookings` takes `serviceId`, `start` and an optional `clientNote` (up to 500 characters), and creates a `pending` booking that holds the slot for 24 hours or until its start, whichever comes first. `whatsappLink` opens a chat with the provider with a message that holds the booking's `reference`, or is `null` when the provider stored no number.
+- `GET /v1/bookings` lists the bookings in which the caller is the client or the provider, newest first, filtered by `status` and paged with `limit` and `cursor` as in the catalog.
+- An account that is not a party to a booking gets `404` from every `/v1/bookings/:id` route. A client calling `confirm`, `decline` or `complete` gets `403`.
+- Transitions write `booking.confirmed`, `booking.declined`, `booking.cancelled` or `booking.completed`; creation writes `booking.created`, and a lapsed hold marked expired writes `booking.expired`. See [Data model](data-model.md#audit_log).
 
 ## Runtime configuration
 

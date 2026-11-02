@@ -7,7 +7,7 @@ The schema is defined in [`api/src/db/schema.ts`](../api/src/db/schema.ts) and c
 | Enum | Values |
 | --- | --- |
 | `account_role` | `provider`, `client` |
-| `booking_status` | `pending`, `confirmed`, `cancelled` |
+| `booking_status` | `pending`, `confirmed`, `declined`, `cancelled`, `expired`, `completed` |
 
 ## Tables
 
@@ -29,11 +29,18 @@ The schema is defined in [`api/src/db/schema.ts`](../api/src/db/schema.ts) and c
 | `id` | `uuid` | Primary key, default `gen_random_uuid()` |
 | `provider_id` | `uuid` | Not null, foreign key to `accounts.id` |
 | `client_id` | `uuid` | Not null, foreign key to `accounts.id` |
+| `service_id` | `uuid` | Not null, foreign key `bookings_service_id_fkey` to `services.id` |
 | `during` | `tstzrange` | Not null, `bookings_during_bounded` |
 | `status` | `booking_status` | Not null, default `pending` |
+| `expires_at` | `timestamp with time zone` | Nullable; not null while `status` is `pending` (`bookings_pending_expires`) |
+| `client_note` | `text` | Nullable, `bookings_client_note_length` (`char_length(client_note) <= 500`) |
 | `created_at` | `timestamp with time zone` | Not null, default `now()` |
+| `updated_at` | `timestamp with time zone` | Not null, default `now()` |
 
-The foreign keys do not check the `role` of the referenced account.
+- The foreign keys do not check the `role` of the referenced account; the API creates bookings only for client accounts and active services of providers with a profile. None of them cascades, so an account or service with bookings cannot be deleted.
+- `expires_at` is when a pending booking lapses: 24 hours after creation, or the start time if that comes sooner. A `pending` row whose `expires_at` has passed stays `pending` until the API marks it `expired`; the API reports it as `expired` before then. See [ADR 0014](decisions/0014-scheduling-model.md#decision).
+- `bookings_client_id_created_at_idx` on `(client_id, created_at, id)` and `bookings_provider_id_created_at_idx` on `(provider_id, created_at, id)` serve `GET /v1/bookings`.
+- Migration `20261102231916_bookings-lifecycle` replaces the enum `booking_status` instead of adding values with `ALTER TYPE ... ADD VALUE`, because an added value cannot be used in the transaction that adds it, and the new exclusion predicate in the same migration names the new values. It adds `service_id` as `NOT NULL` without a default, so it fails on a `bookings` table that already holds rows.
 
 ### `account_credentials`
 
@@ -84,7 +91,12 @@ The foreign keys do not check the `role` of the referenced account.
 | `provider.availability.replaced` | The provider | `{}` |
 | `provider.time_off.created`, `provider.time_off.deleted` | The provider | `{"timeOffId": ...}` |
 
-Provider events hold ids only, never text the provider wrote. `provider.service.deactivated` is written only when the service was active.
+| `booking.created` | The client | `{"bookingId": ..., "serviceId": ..., "providerId": ...}` |
+| `booking.confirmed`, `booking.declined`, `booking.cancelled`, `booking.completed` | The party who made the change | `{"bookingId": ...}` |
+| `booking.expired` | `null` | `{"bookingId": ...}`; written by the request whose booking insert marked the lapsed hold expired |
+| `booking.rate_limited` | The client | `{"scope": "booking-client"}` |
+
+Provider and booking events hold ids only, never text a provider or client wrote. `provider.service.deactivated` is written only when the service was active. `booking.rate_limited` is written once per account and window.
 
 `auth.logout` is written only when the cookie named a session that was deleted. `auth.rate_limited` is written once per rate-limit key and window; see [ADR 0010](decisions/0010-rate-limiting.md#decision).
 
@@ -96,7 +108,7 @@ Provider events hold ids only, never text the provider wrote. `provider.service.
 | `window_start` | `timestamp with time zone` | Not null, part of the primary key, index `rate_limits_window_start_idx` |
 | `count` | `integer` | Not null |
 
-The primary key `rate_limits_pkey` is `(key, window_start)`. Each row counts the hits for one key in one fixed window. Keys are `login:ip:<client>`, `register:ip:<client>` and `login:email:<hex SHA-256 of the lowercased email>`, where `<client>` is an IPv4 address or an IPv6 /64 such as `2001:db8:0:1/64`. The API computes `window_start` from its own clock and increments `count` with `INSERT ... ON CONFLICT (key, window_start) DO UPDATE SET count = rate_limits.count + 1`. Rows whose `window_start` is more than 24 hours old are deleted by a sampled request; `rate_limits_window_start_idx` serves that deletion. See [ADR 0010](decisions/0010-rate-limiting.md).
+The primary key `rate_limits_pkey` is `(key, window_start)`. Each row counts the hits for one key in one fixed window. Keys are `login:ip:<client>`, `register:ip:<client>`, `login:email:<hex SHA-256 of the lowercased email>` and `booking:account:<account id>`, where `<client>` is an IPv4 address or an IPv6 /64 such as `2001:db8:0:1/64`. The API computes `window_start` from its own clock and increments `count` with `INSERT ... ON CONFLICT (key, window_start) DO UPDATE SET count = rate_limits.count + 1`. Rows whose `window_start` is more than 24 hours old are deleted by a sampled request; `rate_limits_window_start_idx` serves that deletion. See [ADR 0010](decisions/0010-rate-limiting.md).
 
 ### `provider_profiles`
 
@@ -172,7 +184,7 @@ Granted by migration `20261102225353_provider-catalog`, which creates the tables
 | `services` | `SELECT`, `INSERT`; `UPDATE` on `title`, `description`, `category`, `price_from_cents`, `duration_minutes`, `active` |
 | `availability_rules` | `SELECT`, `INSERT`, `DELETE` |
 | `time_off` | `SELECT`, `INSERT`, `DELETE` |
-| `bookings` | `SELECT`, for the slots query |
+| `bookings` | `SELECT`, for the slots query. `20261102231916_bookings-lifecycle` adds `INSERT` and `UPDATE` on `status` and `updated_at` |
 
 ## The `during` column
 
@@ -197,11 +209,20 @@ ALTER TABLE "bookings" ADD CONSTRAINT "bookings_no_provider_overlap"
   WHERE ("status" <> 'cancelled');
 ```
 
-- `bookings_no_provider_overlap` rejects a row whose `during` overlaps (`&&`) the `during` of another non-cancelled row with the same `provider_id`. A violation raises SQLSTATE `23P01` (`exclusion_violation`).
+Migration `20261102231916_bookings-lifecycle` drops `bookings_no_provider_overlap` and adds it again with the predicate it has now:
+
+```sql
+ALTER TABLE "bookings" ADD CONSTRAINT "bookings_no_provider_overlap"
+  EXCLUDE USING gist ("provider_id" WITH =, "during" WITH &&)
+  WHERE ("status" IN ('pending', 'confirmed', 'completed'));
+```
+
+- `bookings_no_provider_overlap` rejects a row whose `during` overlaps (`&&`) the `during` of another `pending`, `confirmed` or `completed` row with the same `provider_id`. A violation raises SQLSTATE `23P01` (`exclusion_violation`).
+- The predicate cannot depend on the time, so a `pending` row past its `expires_at` still counts until the API marks it `expired`; the API does that in the transaction that inserts a booking for the provider. See [ADR 0014](decisions/0014-scheduling-model.md#decision).
 - `btree_gist` provides the GiST operator class that lets the constraint compare `uuid` with `=` alongside the range.
 - `bookings_during_bounded` rejects empty ranges and ranges with an unbounded lower or upper end. A violation raises SQLSTATE `23514` (`check_violation`).
 - Ranges written as `[start,end)` are half-open: the end instant is excluded, so a booking ending at 10:00 and another starting at 10:00 for the same provider do not overlap.
-- Rows with status `cancelled` are excluded from the constraint and do not block their slot.
+- Rows with status `declined`, `cancelled` or `expired` are excluded from the constraint and do not block their slot.
 - The constraint applies per provider. Different providers can hold the same slot. Client bookings are not constrained.
 
 The constraint is enforced by Postgres for every writer, independent of application code.
@@ -232,7 +253,7 @@ Because rows cannot be deleted, tests that write audit rows leave them in the da
 
 ## Tests
 
-[`api/test/booking-overlap.test.ts`](../api/test/booking-overlap.test.ts) runs against a real database inside one transaction that is rolled back at the end. Each insert runs inside a savepoint so that a rejected row does not abort the transaction. It covers:
+[`api/test/booking-overlap.test.ts`](../api/test/booking-overlap.test.ts) runs against a real database inside one transaction that is rolled back at the end. Each insert runs inside a savepoint so that a rejected row does not abort the transaction. Both providers get a profile and a service, which every booking references, and pending bookings get an `expires_at`. It covers:
 
 | Case | Expected result |
 | --- | --- |
@@ -244,8 +265,11 @@ Because rows cannot be deleted, tests that write audit rows leave them in the da
 | Range with no upper bound | `23514` |
 | Range with no lower bound | `23514` |
 | Overlapping `pending` booking over a `confirmed` one | `23P01` |
+| New booking over a `declined` and an `expired` booking's slot | Accepted |
+| Overlapping `confirmed` booking over a `completed` one | `23P01` |
+| `pending` booking without `expires_at` | `23514` |
 
-[`api/test/booking-concurrency.test.ts`](../api/test/booking-concurrency.test.ts) exercises concurrent writers on separate pooled connections that commit. Each test creates its own accounts, and every row it creates is deleted in `afterAll`. It covers:
+[`api/test/booking-concurrency.test.ts`](../api/test/booking-concurrency.test.ts) exercises concurrent writers on separate pooled connections that commit. Each test creates its own accounts, provider profile and service, and every row it creates is deleted in `afterAll`. It covers:
 
 | Case | Expected result |
 | --- | --- |

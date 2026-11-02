@@ -51,15 +51,6 @@ test("the role cannot disable the audit trigger or drop the table", async () => 
   await rejects("DROP TABLE audit_log", /must be owner of table audit_log/);
 });
 
-test("the role can read bookings, for the slots query, but cannot write them", async () => {
-  await asApp(async (db) => {
-    expect((await db.query("SELECT count(*) FROM bookings")).rowCount).toBe(1);
-  });
-  await rejects("INSERT INTO bookings (provider_id, client_id, during) VALUES (gen_random_uuid(), gen_random_uuid(), 'empty')", /permission denied for table bookings/);
-  await rejects("UPDATE bookings SET status = 'cancelled'", /permission denied for table bookings/);
-  await rejects("DELETE FROM bookings", /permission denied for table bookings/);
-});
-
 // A provider account with a profile, created as the role inside the rolled-back transaction.
 async function providerProfile(db: pg.PoolClient) {
   const { rows } = await db.query("INSERT INTO accounts (role, display_name) VALUES ('provider', 'role check') RETURNING id");
@@ -132,6 +123,30 @@ test("the role can insert, read and delete time off, and cannot update it", asyn
   expect(await attempt(withTimeOff, (id) => ["UPDATE time_off SET during = '[2030-01-01 00:00+00,2030-01-03 00:00+00)' WHERE id = $1", [id]])).toMatch(
     /permission denied for table time_off/,
   );
+});
+
+const withBooking = async (db: pg.PoolClient) => {
+  const service = await withService(db);
+  const { rows } = await db.query(
+    `INSERT INTO accounts (role, display_name) VALUES ('client', 'role check') RETURNING id`,
+  );
+  const booked = await db.query(
+    `INSERT INTO bookings (provider_id, client_id, service_id, during, expires_at)
+     SELECT provider_id, $2, id, '[2030-01-01 09:00+00,2030-01-01 10:00+00)', now() + interval '1 day' FROM services WHERE id = $1 RETURNING id`,
+    [service, rows[0].id],
+  );
+  return booked.rows[0].id as string;
+};
+
+test("the role can insert and read bookings, and update only their status and updated_at", async () => {
+  expect(await attempt(withBooking, (id) => ["SELECT * FROM bookings WHERE id = $1", [id]])).toBeNull();
+  expect(await attempt(withBooking, (id) => ["UPDATE bookings SET status = 'confirmed', updated_at = now() WHERE id = $1", [id]])).toBeNull();
+  expect(await attempt(withBooking, (id) => ["SELECT id FROM bookings WHERE id = $1 FOR UPDATE", [id]])).toBeNull();
+  for (const column of ["during = '[2030-01-02 09:00+00,2030-01-02 10:00+00)'", "expires_at = now()", "client_note = 'x'", "client_id = provider_id", "service_id = gen_random_uuid()"]) {
+    expect(await attempt(withBooking, (id) => [`UPDATE bookings SET ${column} WHERE id = $1`, [id]])).toMatch(/permission denied for table bookings/);
+  }
+  expect(await attempt(withBooking, (id) => ["DELETE FROM bookings WHERE id = $1", [id]])).toMatch(/permission denied for table bookings/);
+  await rejects("TRUNCATE bookings", /permission denied for table bookings/);
 });
 
 test.each(["provider_profiles", "services", "availability_rules", "time_off"])("the role cannot truncate or drop %s", async (table) => {

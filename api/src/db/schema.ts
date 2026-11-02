@@ -27,7 +27,7 @@ export const tstzrange = customType<{ data: string; driverData: string }>({
 });
 
 export const accountRole = pgEnum('account_role', ['provider', 'client']);
-export const bookingStatus = pgEnum('booking_status', ['pending', 'confirmed', 'cancelled']);
+export const bookingStatus = pgEnum('booking_status', ['pending', 'confirmed', 'declined', 'cancelled', 'expired', 'completed']);
 
 // accounts_id_role_key is the target of provider_profiles' composite foreign key, which limits profiles to providers.
 export const accounts = pgTable(
@@ -88,14 +88,6 @@ export const rateLimits = pgTable(
   (t) => [primaryKey({ columns: [t.key, t.windowStart] }), index('rate_limits_window_start_idx').on(t.windowStart)],
 );
 
-export const bookings = pgTable('bookings', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  providerId: uuid('provider_id').notNull().references(() => accounts.id),
-  clientId: uuid('client_id').notNull().references(() => accounts.id),
-  during: tstzrange('during').notNull(),
-  status: bookingStatus('status').notNull().default('pending'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
 
 // role is always 'provider': with the composite foreign key to accounts (id, role), only a provider account can have a profile.
 export const providerProfiles = pgTable(
@@ -171,5 +163,30 @@ export const timeOff = pgTable(
     foreignKey({ name: 'time_off_provider_id_fkey', columns: [t.providerId], foreignColumns: [providerProfiles.accountId] }).onDelete('cascade'),
     check('time_off_during_bounded', sql`NOT isempty(${t.during}) AND NOT lower_inf(${t.during}) AND NOT upper_inf(${t.during})`),
     index('time_off_provider_id_during_idx').using('gist', t.providerId, t.during),
+  ],
+);
+
+// expires_at is when a pending booking lapses. bookings_no_provider_overlap (custom SQL) cannot depend on the time, so
+// lapsed rows stay 'pending' until the API marks them 'expired'; see ADR 0014.
+export const bookings = pgTable(
+  'bookings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    providerId: uuid('provider_id').notNull().references(() => accounts.id),
+    clientId: uuid('client_id').notNull().references(() => accounts.id),
+    serviceId: uuid('service_id').notNull(),
+    during: tstzrange('during').notNull(),
+    status: bookingStatus('status').notNull().default('pending'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    clientNote: text('client_note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'bookings_service_id_fkey', columns: [t.serviceId], foreignColumns: [services.id] }),
+    check('bookings_client_note_length', sql`char_length(${t.clientNote}) <= 500`),
+    check('bookings_pending_expires', sql`${t.status} <> 'pending' OR ${t.expiresAt} IS NOT NULL`),
+    index('bookings_client_id_created_at_idx').on(t.clientId, t.createdAt, t.id),
+    index('bookings_provider_id_created_at_idx').on(t.providerId, t.createdAt, t.id),
   ],
 );

@@ -19,7 +19,7 @@ The API connects as `chambalink_app`, a role that can only read and write rows. 
 | `sessions` | `SELECT`, `INSERT`, `DELETE` | Session start, lookup, logout (`DELETE ... RETURNING`), expired-session cleanup |
 | `audit_log` | `INSERT` | `api/src/audit.ts`; the API never reads the table |
 | `rate_limits` | `SELECT`, `INSERT`, `UPDATE`, `DELETE` | `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`, `peek`, `reset`, `prune` |
-| `bookings` | none in this migration | `SELECT` is granted by `20261102225353_provider-catalog` for the slots query ([ADR 0014](0014-scheduling-model.md#decision)) |
+| `bookings` | none in this migration | `SELECT` is granted by `20261102225353_provider-catalog` for the slots query, and `INSERT` and `UPDATE` on `status` and `updated_at` by `20261102231916_bookings-lifecycle` ([ADR 0014](0014-scheduling-model.md#decision)) |
 
 No table grants `TRUNCATE`, and `audit_log` grants no `SELECT`, `UPDATE` or `DELETE`. The only sequence in `public` belongs to the `audit_log` identity column, which needs no sequence privilege. The role has nothing on schema `drizzle`, which holds the migration history and its serial sequence.
 

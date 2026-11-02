@@ -57,3 +57,23 @@ test("the provider routes require the session cookie and the catalog routes do n
   expect(price.type).toEqual(["integer", "null"]);
   await app.close();
 });
+
+test("the booking routes require the session cookie, and POST /v1/bookings documents the 429 response", async () => {
+  const app = buildApp();
+  const doc = (await app.inject({ method: "GET", url: "/v1/openapi.json" })).json();
+  const routes = {
+    "/v1/bookings": ["get", "post"],
+    "/v1/bookings/{id}": ["get"],
+    "/v1/bookings/{id}/confirm": ["post"],
+    "/v1/bookings/{id}/decline": ["post"],
+    "/v1/bookings/{id}/cancel": ["post"],
+    "/v1/bookings/{id}/complete": ["post"],
+  };
+  for (const [path, methods] of Object.entries(routes)) {
+    for (const method of methods) expect(doc.paths[path][method].security).toEqual([{ cookieAuth: [] }]);
+  }
+  const schema = doc.paths["/v1/bookings"].post.responses["429"].content["application/problem+json"].schema;
+  expect(schema.properties.code).toMatchObject({ enum: ["RATE_LIMITED"] });
+  expect(schema.required).toContain("retryAfterSeconds");
+  await app.close();
+});

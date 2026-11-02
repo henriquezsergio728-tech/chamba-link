@@ -27,6 +27,7 @@ Concurrent requests on one key each receive a distinct count, so exactly `limit`
 | `LOGIN_IP` | `login:ip:<client>` | 30 | 15 minutes | Every login request that passes schema validation |
 | `LOGIN_EMAIL` | `login:email:<sha256 of the lowercased email>` | 10 | 15 minutes | Failed logins: wrong password or unknown email |
 | `REGISTER_IP` | `register:ip:<client>` | 10 | 1 hour | Every registration request that passes schema validation, including ones answered `409` |
+| `BOOKING_CLIENT` | `booking:account:<account id>` | 20 | 1 hour | Every `POST /v1/bookings` from a client account that passes schema validation; see [ADR 0014](0014-scheduling-model.md#decision) |
 
 Requests rejected by schema validation (`400`) are not counted, because the handler does not run. Keys never contain a raw email.
 
