@@ -43,6 +43,7 @@ On the application host:
 | `/opt/chambalink` | `ubuntu` | Clone of this repository |
 | `/opt/chambalink/.env` | mode `600`, not in git | Production environment |
 | `/etc/nginx/sites-enabled/` | root | Symlink to `/opt/chambalink/deploy/nginx/chambalink.conf`; the stock `default` site is removed |
+| `/etc/nginx/nginx.conf` | root | The distribution's main nginx config, with `worker_rlimit_nofile` and `worker_connections` changed by hand; not in git. See [Settings outside the repository](#settings-outside-the-repository) |
 | `/etc/ssl/chambalink/origin.key` | `root`, mode `600` | TLS private key |
 | `/etc/ssl/chambalink/origin.pem` | `root` | Cloudflare Origin CA certificate |
 | `/etc/iptables/rules.v4` | root | Persisted host IPv4 firewall rules |
@@ -274,6 +275,61 @@ ls -l /etc/nginx/sites-enabled/
 ```
 
 Expected: one symlink pointing to `/opt/chambalink/deploy/nginx/chambalink.conf` and no `default` entry.
+
+### Upstream keepalive
+
+The site config starts with an `upstream` block, and the `location /` proxies to it:
+
+```nginx
+upstream chambalink_api {
+    server 127.0.0.1:3000;
+    keepalive 64;
+    keepalive_timeout 30s;
+}
+```
+
+- Without it, nginx opened a new TCP connection to the API for every proxied request, and Docker's userland proxy (`docker-proxy`), which serves the published port `127.0.0.1:3000`, accepted and copied each of those connections as well.
+- `keepalive 64` keeps up to 64 idle connections to the API open in each nginx worker's cache, so that later requests reuse them.
+- Connection reuse needs HTTP/1.1 and no `Connection: close` header towards the API, so the location sets `proxy_http_version 1.1` and `proxy_set_header Connection ""`.
+- `keepalive_timeout 30s` closes a cached connection after 30 seconds without a request. Fastify closes an idle keep-alive connection after its default `keepAliveTimeout` of 72 seconds, which the API does not change. Because nginx's timeout is the shorter one, nginx closes idle connections first, instead of reusing a connection that the API has just closed.
+
+See [ADR 0015](decisions/0015-nginx-connection-reuse-and-limits.md) for the measurements.
+
+### Settings outside the repository
+
+Two settings live in the distribution's `/etc/nginx/nginx.conf`, which is not in the repository. They were changed by hand on the application host and must be applied the same way on every host that runs this nginx config:
+
+| Setting | Context | Value | Distribution default |
+| --- | --- | --- | --- |
+| `worker_connections` | `events` block | `4096` | `768` |
+| `worker_rlimit_nofile` | main context | `8192` | not set, so workers keep the open-files soft limit of `1024` |
+
+- A proxied request holds two connection slots in its worker: the client connection from Cloudflare and the upstream connection to the API. Idle upstream connections in the keepalive cache hold slots too. With `768` slots, nginx failed requests with `worker_connections are not enough while connecting to upstream` under load.
+- Every connection is a file descriptor, so the descriptor limit must cover the slots. With the soft limit of `1024`, raising `worker_connections` to `4096` would only move the failure to the descriptor limit; `worker_rlimit_nofile 8192` gives each worker room for its 4096 connections plus its log and other open files.
+
+### Checking the nginx configuration
+
+Show the settings as nginx loads them, from the main config and the site config:
+
+```bash
+sudo nginx -T 2>/dev/null | grep -E 'worker_rlimit_nofile|worker_connections|upstream chambalink_api|keepalive 64|keepalive_timeout 30s|proxy_pass|proxy_http_version|Connection ""'
+```
+
+Expected: `worker_rlimit_nofile 8192;`, `worker_connections 4096;`, `upstream chambalink_api {`, `keepalive 64;`, `keepalive_timeout 30s;`, `proxy_pass http://chambalink_api;`, `proxy_http_version 1.1;` and `proxy_set_header Connection "";`.
+
+Test the configuration, then reload gracefully:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+`nginx -t` must report `syntax is ok` and `test is successful`. A reload starts new workers with the new configuration and lets the old workers finish their open requests; it does not drop connections. Check that the running workers have the raised descriptor limit:
+
+```bash
+for pid in $(pgrep -f 'nginx: worker'); do grep 'Max open files' /proc/$pid/limits; done
+```
+
+Expected: `8192` as the soft and hard limit for every worker.
 
 ## Cloudflare real-IP ranges
 

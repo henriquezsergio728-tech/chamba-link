@@ -78,27 +78,53 @@ For `s0a-app-tier.js` and `s0b-session.js` the report has one row per rate step:
 | Column | Meaning |
 | --- | --- |
 | `step` | The scenario name, `r<rate>`, where the rate is the target in requests per second |
-| `achieved rps` | Requests sent in the step divided by `STEP_SECONDS`. Below the target, the client could not keep up or the run was aborted during the step |
+| `achieved rps` | Requests sent in the step divided by `STEP_SECONDS`. Below the target, the client could not keep up. `partial` for a step that was cut short, for which no rate is computed; see below |
 | `requests` | Requests sent in the step |
 | `p50`, `p95`, `p99` | Percentiles of `http_req_duration`, the time from sending the request to receiving the whole response |
 | `failed` | Share of requests that failed |
-| `errors` | Every status other than `200` that occurred in the step, as `<status>:<count>` separated by spaces, for example `0:12 502:3`. Statuses `0`, `401`, `403`, `429`, `500`, `502`, `503` and `504` are counted; any other status adds up to `other:<count>`. `-` when every response was `200` |
+| `errors` | Every status other than `200` that occurred in the step, as `<status>:<count>` separated by spaces, for example `0:12 502:3`. Statuses `0`, `401`, `403`, `404`, `408`, `429`, `499`, `500`, `502`, `503`, `504`, `520` to `526` and `530` are counted by name; any other status adds up to `other:<count>`. `-` when every response was `200` |
 | `dropped` | Iterations k6 skipped because every VU up to `MAX_VUS` was busy |
 
-A step that did not run shows `-`. The counters `non_dynamic` and `no_cf_header` follow the table.
+A step that did not run, with no request sent and no iteration dropped, shows `-` in every column except `step`, `requests` and `dropped`.
+
+A step is partial when `requests + dropped < 0.98 × (rate × STEP_SECONDS + 1)`. A `constant-arrival-rate` step that runs its whole duration starts `rate × STEP_SECONDS + 1` iterations, and each is either sent as a request or dropped, so a partial step stopped early, usually because a threshold aborted the run. Its `achieved rps` shows `partial`, and a footnote under the table gives the seconds it ran, estimated as `(requests + dropped) / rate`, for example:
+
+```text
+r1000: partial, ran about 11.1s ((requests + dropped) / 1000)
+```
+
+The counters `non_dynamic` and `no_cf_header` follow the table and the footnotes.
+
+The JSON summary of `s0a-app-tier.js` and `s0b-session.js` also has a top-level `steps` array with one object per step:
+
+| Member | Meaning |
+| --- | --- |
+| `step`, `rate` | The scenario name and its target rate |
+| `ran` | `false` for a step that sent no request and dropped no iteration |
+| `partial` | `true` for a partial step |
+| `achievedRps` | `requests / STEP_SECONDS`, or `null` for a partial step or one that did not run |
+| `estimatedSeconds` | `(requests + dropped) / rate` for a partial step, otherwise `null` |
+| `requests`, `dropped` | As in the table |
+| `p50`, `p95`, `p99` | `http_req_duration` percentiles in milliseconds, or `null` without requests |
+| `failedRate` | Share of failed requests from 0 to 1, or `null` without requests |
+| `errors` | The `errors` column's text, or `null` without requests |
 
 What a status in `errors` usually indicates in this setup:
 
 | Status | Usual source |
 | --- | --- |
 | `0` | No response reached k6: a connection error, such as a refused or reset connection, or k6's request timeout of 60 seconds |
+| `404` | No route matched: `BASE_URL` points at the wrong host or path. Both `GET /healthz` and `GET /v1/me` exist in the API |
+| `408` | nginx did not receive the request's headers or body within its client timeouts, 60 seconds by default; the nginx config does not change them |
 | `401` | The API rejected the session: `SESSION_COOKIE` is missing, malformed, expired or logged out. `GET /healthz` does not return it |
 | `403`, `429` | The Cloudflare layer, which can block or rate limit a client sending many requests. Neither `GET /healthz` nor `GET /v1/me` returns them from the API |
 | `500` | The API could not get a Postgres connection within 5 seconds, the pool's `connectionTimeoutMillis`, because all `DB_POOL_MAX` connections were in use or the database was unreachable, or another unhandled error |
 | `502` | nginx could not reach the API container or lost the connection to it |
 | `503` | Neither the API nor the nginx config in this repository produces it |
+| `499` | nginx records `499` in its access log when the client closes the connection before the response, and sends no response; a `499` that reaches k6 comes from another layer of the path |
 | `504` | nginx waited longer than its default `proxy_read_timeout` of 60 seconds for the API; the nginx config does not change it |
-| `other` | Any other status, for example one of Cloudflare's own `52x` codes when it cannot get a valid answer from the origin |
+| `520` to `526`, `530` | Cloudflare could not get a valid answer from the origin, for example `521` when the origin refused the connection, `522` when connecting to it timed out, `524` when it accepted the connection but did not answer in time, and `525` or `526` when the TLS handshake or the origin certificate failed |
+| `other` | Any status not listed above |
 
 For `s0c-auth.js` the report has the count, `p50`, `p95`, `p99` and maximum of `login_ok_duration` and `login_limited_duration`, followed by the request counts per status.
 
