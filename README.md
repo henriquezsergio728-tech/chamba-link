@@ -137,6 +137,7 @@ The booking, database plugin, auth, rate-limit, provider, catalog and bookings r
   - [0012 Dedicated database host](docs/decisions/0012-dedicated-database-host.md)
   - [0013 Least-privilege database role](docs/decisions/0013-least-privilege-database-role.md)
   - [0014 Scheduling model](docs/decisions/0014-scheduling-model.md)
+  - [0015 nginx connection reuse and connection limits](docs/decisions/0015-nginx-connection-reuse-and-limits.md)
 
 ## License
 

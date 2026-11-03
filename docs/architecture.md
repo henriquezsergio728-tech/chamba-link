@@ -44,7 +44,7 @@ Production is two hosts. The application host, an arm64 VM.Standard.A1.Flex, run
 2. Cloudflare terminates the client's TLS connection. With Always Use HTTPS on, Cloudflare answers plain HTTP requests with a `301` redirect to HTTPS.
 3. Cloudflare connects to the application host on port 443 over IPv4 and validates the origin certificate (SSL/TLS mode Full (strict)).
 4. nginx terminates TLS with a Cloudflare Origin CA certificate. For peers in Cloudflare's published ranges it replaces `$remote_addr` with the `CF-Connecting-IP` header (`deploy/nginx/cloudflare-real-ip.conf`).
-5. nginx proxies the request to `http://127.0.0.1:3000` with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set.
+5. nginx proxies the request to the upstream `chambalink_api`, `127.0.0.1:3000`, over HTTP/1.1, reusing an idle connection from the keepalive cache when one is available, with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set and an empty `Connection` header.
 6. Docker forwards `127.0.0.1:3000` to port 3000 of the `api` container, where Fastify listens on `0.0.0.0`. Fastify takes `request.ip` from `X-Forwarded-For` because its peer is in a loopback or private range (`trustProxy: "loopback,uniquelocal"`).
 7. For the account, session, provider, catalog and booking routes, the API queries Postgres over the private network at the database host's private address, port 5432, as set in `DATABASE_URL`. The connection is not encrypted with TLS.
 
@@ -54,16 +54,16 @@ The application host has no IPv6 address. Cloudflare serves clients over IPv4 an
 
 ## nginx
 
-`deploy/nginx/chambalink.conf` holds one server block:
+`deploy/nginx/chambalink.conf` holds an `upstream` block, `chambalink_api` with `server 127.0.0.1:3000`, `keepalive 64` and `keepalive_timeout 30s`, and one server block:
 
 - `listen 80 default_server` and `listen 443 ssl http2`, each for IPv4 and IPv6.
 - `server_name chambalink.online www.chambalink.online`. `www` is not redirected to the apex.
 - `ssl_certificate /etc/ssl/chambalink/origin.pem`, `ssl_certificate_key /etc/ssl/chambalink/origin.key`, `ssl_protocols TLSv1.2 TLSv1.3`.
-- One `location /` that proxies to `http://127.0.0.1:3000`.
+- One `location /` that proxies to `http://chambalink_api` with `proxy_http_version 1.1` and `proxy_set_header Connection ""`, so that connections to the API are reused. See [Deployment](deployment.md#upstream-keepalive) and [ADR 0015](decisions/0015-nginx-connection-reuse-and-limits.md).
 
 Port 80 is the `default_server`, so it answers plain HTTP for any `Host`. The host firewall blocks port 80 from outside the application host, so it is reachable on loopback only. Port 443 has no other server block, so nginx uses this one for every TLS connection on it.
 
-The file starts with `include /opt/chambalink/deploy/nginx/cloudflare-real-ip.conf;`, an absolute path into the clone. That file lists Cloudflare's IPv4 and IPv6 ranges as `set_real_ip_from` entries and sets `real_ip_header CF-Connecting-IP`. See [Deployment](deployment.md#cloudflare-real-ip-ranges) for how it is regenerated.
+After the `upstream` block, the file includes `/opt/chambalink/deploy/nginx/cloudflare-real-ip.conf`, an absolute path into the clone. That file lists Cloudflare's IPv4 and IPv6 ranges as `set_real_ip_from` entries and sets `real_ip_header CF-Connecting-IP`. See [Deployment](deployment.md#cloudflare-real-ip-ranges) for how it is regenerated.
 
 ## Trust boundaries
 
