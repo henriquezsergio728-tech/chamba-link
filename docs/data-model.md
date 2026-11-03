@@ -305,7 +305,7 @@ Each migration is a directory `api/drizzle/<timestamp>_<name>/` holding `migrati
 | --- | --- | --- |
 | Local development and CI job `test` | `pnpm --filter @chamba/api exec drizzle-kit migrate` | `api/drizzle.config.ts`, which reads `DATABASE_URL` and loads `../.env` if present |
 | CI job `image` | `node dist/migrate.js` inside the built image, run twice against a fresh Postgres | `DATABASE_URL` set on `docker run` |
-| Production | `docker compose run --rm migrate`, which runs `node dist/migrate.js` inside the API image | `DATABASE_URL` set from `MIGRATE_DATABASE_URL` by the `migrate` service in `compose.prod.yaml` |
+| Production | `docker compose run --rm migrate`, which runs `node dist/migrate.js` inside the API image | `DATABASE_URL` set from `MIGRATE_DATABASE_URL` by the `migrate` service in `deploy/app/migrate.yaml` |
 
 `api/src/migrate.ts` uses the `drizzle-orm` node-postgres migrator with `migrationsFolder: './drizzle'`. The image includes `api/drizzle/` because it is listed in the `files` field of `api/package.json`. On success it prints `migrations applied`.
 
