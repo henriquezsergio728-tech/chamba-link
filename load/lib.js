@@ -7,8 +7,12 @@ const DEFAULT_STEP_SECONDS = 45;
 const DEFAULT_PRE_ALLOCATED_VUS = 100;
 const DEFAULT_MAX_VUS = 1000;
 export const SUMMARY_TREND_STATS = ["count", "avg", "min", "p(50)", "p(95)", "p(99)", "max"];
-// Statuses counted per step. k6 tags a request that got no response with status 0.
-const STEP_STATUSES = [0, 200, 401, 403, 429, 500, 502, 503, 504];
+// Statuses counted per step, so the errors column can name them. k6 tags a request that got no response with status 0.
+// 499 is nginx's code for a client that closed the connection; 520-526 and 530 are Cloudflare's origin errors.
+const CLOUDFLARE_STATUSES = [520, 521, 522, 523, 524, 525, 526, 530];
+const STEP_STATUSES = [0, 200, 401, 403, 404, 408, 429, 499, 500, 502, 503, 504, ...CLOUDFLARE_STATUSES];
+// A step is partial when it sent or dropped fewer than this share of the iterations a full step starts.
+const PARTIAL_SHARE = 0.98;
 
 // Throwing in the init context stops k6 before any request is sent.
 export function requireEnv(name) {
@@ -114,31 +118,61 @@ function stepErrors(data, rate, count) {
   return parts.length ? parts.join(" ") : "-";
 }
 
-// One row per rate step: target rate, achieved requests per second, latency percentiles, failures, errors and drops.
-export function rateTable(data) {
+// One object per rate step, for the table and the JSON summary. A constant-arrival-rate step that runs its whole
+// duration starts rate x step + 1 iterations, each sent or dropped. A step that started fewer than 98% of those was cut
+// short, usually by an abort: it is "partial", its achieved rate is not computed, and estimatedSeconds is how long it
+// ran at the target rate. A step that started none did not run.
+export function rateSteps(data) {
   const step = positiveInteger("STEP_SECONDS", DEFAULT_STEP_SECONDS);
-  const rows = rates().map((rate) => {
+  return rates().map((rate) => {
     const tag = `{scenario:r${rate}}`;
     const reqs = values(data, `http_reqs${tag}`);
     const duration = values(data, `http_req_duration${tag}`);
     const failed = values(data, `http_req_failed${tag}`);
-    const dropped = values(data, `dropped_iterations${tag}`);
-    const count = reqs ? reqs.count : 0;
+    const droppedValues = values(data, `dropped_iterations${tag}`);
+    const requests = reqs ? reqs.count : 0;
+    const dropped = droppedValues ? droppedValues.count : 0;
     // A step that never ran, for example after an abort, has empty submetrics that k6 reports as zeros.
-    const ran = count > 0;
-    return [
-      `r${rate}`,
-      (count / step).toFixed(1),
-      String(count),
-      ran ? ms(duration["p(50)"]) : "-",
-      ran ? ms(duration["p(95)"]) : "-",
-      ran ? ms(duration["p(99)"]) : "-",
-      ran ? `${(failed.rate * 100).toFixed(2)}%` : "-",
-      ran ? stepErrors(data, rate, count) : "-",
-      String(dropped ? dropped.count : 0),
-    ];
+    const ran = requests + dropped > 0;
+    const partial = ran && requests + dropped < PARTIAL_SHARE * (rate * step + 1);
+    const answered = requests > 0;
+    return {
+      step: `r${rate}`,
+      rate,
+      ran,
+      partial,
+      achievedRps: ran && !partial ? requests / step : null,
+      estimatedSeconds: partial ? (requests + dropped) / rate : null,
+      requests,
+      dropped,
+      p50: answered ? duration["p(50)"] : null,
+      p95: answered ? duration["p(95)"] : null,
+      p99: answered ? duration["p(99)"] : null,
+      failedRate: answered ? failed.rate : null,
+      errors: answered ? stepErrors(data, rate, requests) : null,
+    };
   });
-  return table(["step", "achieved rps", "requests", "p50", "p95", "p99", "failed", "errors", "dropped"], rows);
+}
+
+// One row per rate step: target rate, achieved requests per second, latency percentiles, failures, errors and drops,
+// followed by a footnote for each partial step.
+export function rateTable(steps) {
+  const rows = steps.map((s) => [
+    s.step,
+    !s.ran ? "-" : s.partial ? "partial" : s.achievedRps.toFixed(1),
+    String(s.requests),
+    s.p50 === null ? "-" : ms(s.p50),
+    s.p95 === null ? "-" : ms(s.p95),
+    s.p99 === null ? "-" : ms(s.p99),
+    s.failedRate === null ? "-" : `${(s.failedRate * 100).toFixed(2)}%`,
+    s.errors === null ? "-" : s.errors,
+    String(s.dropped),
+  ]);
+  const notes = steps
+    .filter((s) => s.partial)
+    .map((s) => `${s.step}: partial, ran about ${s.estimatedSeconds.toFixed(1)}s ((requests + dropped) / ${s.rate})`);
+  const text = table(["step", "achieved rps", "requests", "p50", "p95", "p99", "failed", "errors", "dropped"], rows);
+  return notes.length ? `${text}\n\n${notes.join("\n")}` : text;
 }
 
 // What a run was pointed at, for the report and the JSON summary. Credentials are never part of it.
@@ -162,8 +196,8 @@ export function trendTable(data, names) {
 // The stdout report plus the full JSON summary at load/results/<script>-<timestamp>.json, relative to the directory
 // k6 runs from. k6 does not create the directory. The timestamp is ISO 8601 basic format (no colons), e.g. 20261102T153000Z.
 // `run` holds base and, for rate scripts, rates and step; the report's first line and the JSON's "run" object carry
-// it with the finish time.
-export function summaryOutput(script, data, text, run) {
+// it with the finish time. `extra` adds top-level members to the JSON, such as the rate scripts' "steps".
+export function summaryOutput(script, data, text, run, extra = {}) {
   const now = new Date();
   const finished = now.toISOString();
   const stamp = finished.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
@@ -173,6 +207,6 @@ export function summaryOutput(script, data, text, run) {
   if (run.rates !== undefined) line.push(`rates=${run.rates}`, `step=${run.step}s`);
   return {
     stdout: `${line.join(" ")}\n\n${script}\n\n${text}\n\nfull summary: ${path}\n`,
-    [path]: JSON.stringify({ run: full, ...data }, null, 2),
+    [path]: JSON.stringify({ run: full, ...extra, ...data }, null, 2),
   };
 }

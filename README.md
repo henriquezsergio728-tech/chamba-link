@@ -122,6 +122,7 @@ The booking, database plugin, auth, rate-limit, provider, catalog and bookings r
 - [Development](docs/development.md): toolchain, scripts, tests and contribution rules
 - [CI/CD](docs/ci-cd.md): the GitHub Actions pipeline and image registry
 - [Deployment](docs/deployment.md): production runbook for the application and database hosts
+- [Performance](docs/performance.md): load-test method and measured results
 - [Decisions](docs/decisions/): architecture decision records
   - [0001 Fastify on TypeScript and Node 24](docs/decisions/0001-fastify-typescript-node.md)
   - [0002 Drizzle with checked-in SQL migrations](docs/decisions/0002-drizzle-sql-migrations.md)

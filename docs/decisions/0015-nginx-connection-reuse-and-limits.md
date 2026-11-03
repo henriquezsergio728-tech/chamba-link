@@ -4,7 +4,7 @@
 
 nginx on the application host proxied every request to `http://127.0.0.1:3000` with a new TCP connection to the API. The port is published by Docker, so Docker's userland proxy (`docker-proxy`) accepted each of those connections and copied it to the `api` container. Each nginx worker had the distribution default of `worker_connections 768`.
 
-The S0a load test ([`load/s0a-app-tier.js`](../../load/s0a-app-tier.js), `GET /healthz`) measured the application host, one 1-OCPU Arm VM, with load sent through Cloudflare. Steps up to 700 requests per second had no failed requests. At 800 to 1000 requests per second the CPU reached 100% busy, with 9 to 10% steal, and nginx answered `500` and logged `worker_connections are not enough while connecting to upstream`: 1294 such alerts in the first saturated step, equal to the 1294 requests logged with status `500`.
+The S0a load test ([`load/s0a-app-tier.js`](../../load/s0a-app-tier.js), `GET /healthz`) measured the application host, one 1-OCPU Arm VM, with load sent through Cloudflare; see [Performance](../performance.md) for the method and the figures per run. Steps up to 700 requests per second had no failed requests. At 800 to 1000 requests per second the CPU reached 100% busy, with 9 to 10% steal, and nginx answered `500` and logged `worker_connections are not enough while connecting to upstream`: 1294 such alerts in the first saturated step, equal to the 1294 requests logged with status `500`.
 
 At 700 requests per second the processes on the path used this share of the CPU, and the CPU was 94.4% busy:
 

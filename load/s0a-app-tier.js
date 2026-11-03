@@ -1,6 +1,6 @@
 // S0a: the application tier without the database. GET /healthz answers from the Fastify process alone.
 import http from "k6/http";
-import { baseUrl, CACHE_COUNTERS, checkResponse, counterLines, rampOptions, rampRun, rateTable, summaryOutput } from "./lib.js";
+import { baseUrl, CACHE_COUNTERS, checkResponse, counterLines, rampOptions, rampRun, rateSteps, rateTable, summaryOutput } from "./lib.js";
 
 const URL = `${baseUrl()}/healthz`;
 
@@ -11,5 +11,6 @@ export function hit() {
 }
 
 export function handleSummary(data) {
-  return summaryOutput("s0a-app-tier", data, `${rateTable(data)}\n\n${counterLines(data, CACHE_COUNTERS)}`, rampRun());
+  const steps = rateSteps(data);
+  return summaryOutput("s0a-app-tier", data, `${rateTable(steps)}\n\n${counterLines(data, CACHE_COUNTERS)}`, rampRun(), { steps });
 }
