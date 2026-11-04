@@ -16,7 +16,7 @@ Replace the open `ACCEPT` rules for ports 80 and 443 with 15 plain iptables rule
 - The ranges are a static copy of `https://www.cloudflare.com/ips-v4` dated 2026-10-22.
 - Nothing refreshes them.
 - Connections from Cloudflare addresses outside those ranges are rejected until the rules are updated.
-- The rules live on the VM, not in the repository.
+- The rules live on each VM. [`ops/node/bootstrap.sh`](../../ops/node/bootstrap.sh) builds them on a provisioned node ([ADR 0016](0016-application-node-provisioning.md)).
 - The rules cover IPv4 only.
 - Port 22 has no source restriction in the host rules.
 - The drift check in [Deployment](../deployment.md#firewall-verification) compares the firewall rules with Cloudflare's list and does not cover `deploy/nginx/cloudflare-real-ip.conf`.

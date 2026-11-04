@@ -51,6 +51,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   └── app/migrate.yaml      Overlay that adds the migrator service
 ├── load/                     k6 load scripts and their README
 ├── ops/                      Database backup script and its systemd units
+│   └── node/                 Application node provisioning and verification scripts
 ├── docs/                     Project documentation and ADRs
 ├── .github/
 │   ├── workflows/ci.yml      CI pipeline
@@ -140,6 +141,7 @@ The booking, database plugin, auth, rate-limit, provider, catalog and bookings r
   - [0013 Least-privilege database role](docs/decisions/0013-least-privilege-database-role.md)
   - [0014 Scheduling model](docs/decisions/0014-scheduling-model.md)
   - [0015 nginx connection reuse and connection limits](docs/decisions/0015-nginx-connection-reuse-and-limits.md)
+  - [0016 Application node provisioning](docs/decisions/0016-application-node-provisioning.md)
 
 ## License
 

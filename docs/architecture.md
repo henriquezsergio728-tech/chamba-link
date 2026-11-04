@@ -70,7 +70,7 @@ After the `upstream` block, the file includes `/opt/chambalink/deploy/nginx/clou
 | Boundary | What is trusted | Mechanism |
 | --- | --- | --- |
 | Client to Cloudflare | Cloudflare's edge certificate | Managed by Cloudflare |
-| Network to origin | TCP 443 only from Cloudflare's IPv4 ranges; port 80 not reachable from outside | Host iptables `INPUT` rules on the application host, not in the repo. See [Deployment](deployment.md#firewall). |
+| Network to origin | TCP 443 only from Cloudflare's IPv4 ranges; port 80 not reachable from outside | Host iptables `INPUT` rules on the application host; `ops/node/bootstrap.sh` builds them on a provisioned node. See [Deployment](deployment.md#firewall). |
 | Cloudflare to nginx | The origin presents a certificate signed by Cloudflare Origin CA | SSL/TLS mode Full (strict) |
 | nginx visitor address | `CF-Connecting-IP`, only when the peer is in Cloudflare's ranges | `ngx_http_realip_module` with `cloudflare-real-ip.conf` |
 | Fastify client address | `X-Forwarded-For`, only when the peer is loopback or private | `trustProxy: "loopback,uniquelocal"` in `api/src/app.ts` |

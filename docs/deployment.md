@@ -2,7 +2,7 @@
 
 Runbook for production. Commands that start with `cd /opt/chambalink` or use `docker compose` run in the clone on the host that the section names; on the application host they run as the `ubuntu` user unless they use `sudo`. Where a section still says "the VM", it means the application host. Commands marked as run from outside the VM or the application host run on any other machine.
 
-Production is two hosts: the application host runs nginx and the `api` container, and the database host runs Postgres. See [Hosts](#hosts) and [ADR 0012](decisions/0012-dedicated-database-host.md). A systemd timer on the database host backs up the database to Object Storage every six hours; see [Backups](#backups). The host firewall rules that restrict port 443 to Cloudflare's IPv4 ranges exist only on the application host, and the network security groups that restrict port 5432 exist only in OCI; neither is in the repository.
+Production is two hosts: the application host runs nginx and the `api` container, and the database host runs Postgres. See [Hosts](#hosts) and [ADR 0012](decisions/0012-dedicated-database-host.md). A systemd timer on the database host backs up the database to Object Storage every six hours; see [Backups](#backups). The host firewall rules restrict port 443 to Cloudflare's IPv4 ranges; [`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh) builds them on a provisioned node. The network security groups that restrict port 5432 exist only in OCI and are not in the repository.
 
 ## Hosts
 
@@ -43,7 +43,7 @@ On the application host:
 | `/opt/chambalink` | `ubuntu` | Clone of this repository |
 | `/opt/chambalink/.env` | mode `600`, not in git | Production environment |
 | `/etc/nginx/sites-enabled/` | root | Symlink to `/opt/chambalink/deploy/nginx/chambalink.conf`; the stock `default` site is removed |
-| `/etc/nginx/nginx.conf` | root | The distribution's main nginx config, with `worker_rlimit_nofile` and `worker_connections` changed by hand; not in git. See [Settings outside the repository](#settings-outside-the-repository) |
+| `/etc/nginx/nginx.conf` | root | The distribution's main nginx config, with `worker_rlimit_nofile` and `worker_connections` changed; not in git. See [Settings outside the repository](#settings-outside-the-repository) |
 | `/etc/ssl/chambalink/origin.key` | `root`, mode `600` | TLS private key |
 | `/etc/ssl/chambalink/origin.pem` | `root` | Cloudflare Origin CA certificate |
 | `/etc/iptables/rules.v4` | root | Persisted host IPv4 firewall rules |
@@ -114,7 +114,7 @@ Expected: two `*.ns.cloudflare.com` name servers, and Cloudflare addresses for t
 The origin certificate:
 
 - covers `chambalink.online` and a wildcard, and expires on Oct 18 2041;
-- uses an RSA 2048 key generated on the application host with `openssl`; only the CSR was submitted to Cloudflare, so the private key has not left the application host;
+- uses an RSA 2048 key generated on the application host with `openssl`; only the CSR was submitted to Cloudflare. The private key is on the application host and, root-only under `/etc/chambalink/secrets/` and `/etc/ssl/chambalink/`, on each node provisioned with [`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh);
 - is trusted only by Cloudflare, so a client that reaches the origin directly gets an untrusted-certificate error unless it trusts Cloudflare Origin CA. From outside the application host, only Cloudflare's IPv4 ranges can reach port 443; see [Firewall](#firewall).
 
 Cloudflare sends no expiry notifications for Origin CA certificates. No renewal is configured on the application host. See [ADR 0006](decisions/0006-cloudflare-origin-ca-certificate.md).
@@ -297,7 +297,7 @@ See [ADR 0015](decisions/0015-nginx-connection-reuse-and-limits.md) for the meas
 
 ### Settings outside the repository
 
-Two settings live in the distribution's `/etc/nginx/nginx.conf`, which is not in the repository. They were changed by hand on the application host and must be applied the same way on every host that runs this nginx config:
+Two settings live in the distribution's `/etc/nginx/nginx.conf`, which is not in the repository. [`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh) sets them on every node it provisions; see [Provisioning an application node](#provisioning-an-application-node). On the application host they were changed by hand:
 
 | Setting | Context | Value | Distribution default |
 | --- | --- | --- | --- |
@@ -345,7 +345,7 @@ The file is committed. nginx on the application host reads the copy in `/opt/cha
 
 The stock OCI Ubuntu image has an iptables `INPUT` chain that ends in a `REJECT` rule. A port stays blocked by it even when the VCN security list allows it, unless an `ACCEPT` rule above the `REJECT` matches.
 
-The host firewall rules exist only on the application host. The repository does not contain them. See [ADR 0007](decisions/0007-host-firewall-cloudflare-ranges.md).
+The rules on the application host were applied by hand, as described below. [`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh) builds the same rules on a provisioned node, from the IPv4 ranges in `deploy/nginx/cloudflare-real-ip.conf`. See [ADR 0007](decisions/0007-host-firewall-cloudflare-ranges.md).
 
 ### Applied rules
 
@@ -368,6 +368,8 @@ The IPv4 `INPUT` chain on the application host, in order:
 ### Persistence
 
 The rules are persisted by editing `/etc/iptables/rules.v4`, not with `netfilter-persistent save`. The original stock rules were saved before Docker was installed, so Docker's chains are not part of the persisted rules. Running `sudo netfilter-persistent save` now that Docker is installed would also persist Docker's chains.
+
+On a provisioned node, `ops/node/bootstrap.sh` builds the chain before it installs Docker and runs `netfilter-persistent save`, so the first save holds no Docker chains. It saves again only when the `INPUT` chain differs from what it builds. On a node where Docker is running, that later save persists Docker's chains too, and the script prints a warning.
 
 ### Procedure as executed
 
@@ -459,6 +461,92 @@ The checks on the application host against `127.0.0.1` and the checks through `c
 ### Docker
 
 Docker-published ports bypass `INPUT` rules. For this reason the `api` container publishes on `127.0.0.1` only, and only nginx is reachable from outside the application host. On the database host, `db` publishes 5432 on the private address only; see [Private network access](#private-network-access).
+
+## Provisioning an application node
+
+[`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh) builds an application node from a fresh Ubuntu 24.04 arm64 image, and [`ops/node/verify.sh`](../ops/node/verify.sh) checks the result. A node built this way runs only the API: its `COMPOSE_FILE` is `compose.prod.yaml:deploy/app/compose.yaml`, and its `.env` holds `COMPOSE_FILE`, `API_TAG` and `DATABASE_URL`, with no `MIGRATE_DATABASE_URL`. See [ADR 0016](decisions/0016-application-node-provisioning.md).
+
+The VM needs a `ubuntu` user with `sudo`, and outbound HTTPS to the Ubuntu mirrors, Docker's apt repository, GitHub and GHCR. The API image is public, so the node has no registry login.
+
+### Inputs
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `API_TAG` | Yes | none | Full commit SHA of a published image: 40 lowercase hexadecimal characters |
+| `REPO_REF` | No | `main` | Branch, tag or commit of the clone |
+| `REPO_URL` | No | The public repository's HTTPS URL | Origin of the clone |
+| `APP_USER` | No | `ubuntu` | Owner of the clone and of `.env`; added to the `docker` group |
+
+### Secrets directory
+
+The script reads secrets only from `/etc/chambalink/secrets/`:
+
+| File | Owner and mode | Contents |
+| --- | --- | --- |
+| `/etc/chambalink/secrets/` | `root`, mode `700` | The directory |
+| `origin.pem` | `root`, mode `644` or stricter | Cloudflare Origin CA certificate |
+| `origin.key` | `root`, mode `600` or stricter | TLS private key |
+| `database_url` | `root`, mode `600` or stricter | The API's `DATABASE_URL` on one line, as in [Production environment](#production-environment): a `postgres://` or `postgresql://` URL with no whitespace, quote, `$`, `#` or backslash |
+
+The script checks all three files before it changes anything. It copies the TLS files to `/etc/ssl/chambalink/` and writes the URL to `.env`. It does not print their contents.
+
+To copy the secrets from a host that has them to a new node without printing them, run these from a machine with SSH access to both, with `<source>` and `<node>` replaced by their addresses:
+
+```bash
+ssh ubuntu@<node> 'sudo install -d -o root -g root -m 700 /etc/chambalink /etc/chambalink/secrets'
+ssh ubuntu@<source> 'sudo tar -C /etc/ssl/chambalink -cf - origin.pem origin.key' | ssh ubuntu@<node> 'sudo tar -C /etc/chambalink/secrets --no-same-owner -xf -'
+ssh ubuntu@<source> "sed -n 's/^DATABASE_URL=//p' /opt/chambalink/.env" | ssh ubuntu@<node> "sudo sh -c 'umask 077; cat > /etc/chambalink/secrets/database_url'"
+ssh ubuntu@<node> 'sudo stat -c "%a %U %s %n" /etc/chambalink/secrets/*'
+```
+
+The data passes through the pipes, not the terminal. The last command prints only modes, owners, sizes and names. Expected: `644 root` for `origin.pem`, `600 root` for `origin.key` and `database_url`, and sizes above `0`.
+
+### Commands
+
+On the new node, fetch the script and run it, with `<sha>` replaced by the image's commit SHA. `sudo` drops the caller's environment, so the variables go after it:
+
+```bash
+git clone --depth 1 https://github.com/henriquezsergio728-tech/chamba-link.git /tmp/chambalink-bootstrap
+sudo API_TAG=<sha> bash /tmp/chambalink-bootstrap/ops/node/bootstrap.sh
+rm -rf /tmp/chambalink-bootstrap
+```
+
+The script prints one line per step and ends with the status of `/healthz` on loopback, from the API on port 3000 and over `https` through nginx. On a failure it prints the failing line and exits non-zero. A second run with the same inputs changes nothing.
+
+It refuses a host whose `.env` defines `MIGRATE_DATABASE_URL`, because it writes `.env` without that variable.
+
+In order, it:
+
+1. Checks the inputs, and exits 1 with a list of every problem before it changes anything.
+2. Installs `ca-certificates`, `curl`, `git`, `iptables-persistent` and `nginx`.
+3. Clones the repository to `/opt/chambalink` as `APP_USER`, or updates the clone to `REPO_REF`.
+4. Rebuilds the `INPUT` chain as in [Applied rules](#applied-rules), in one `iptables-restore` transaction, and saves it. It aborts if fewer than 10 ranges parse. `FORWARD`, `nat` and Docker's chains are not touched.
+5. Installs Docker Engine and the Compose plugin from Docker's apt repository, writes `/etc/docker/daemon.json`, and adds `APP_USER` to the `docker` group.
+6. Installs the TLS files, sets the two limits in `/etc/nginx/nginx.conf`, removes the `default` site, links the site config, and reloads nginx if any of these changed and `nginx -t` passes.
+7. Writes `.env`, then runs `docker compose pull` and `docker compose up -d --wait`.
+8. Waits for both health checks.
+
+### Checking a node
+
+```bash
+sudo bash /opt/chambalink/ops/node/verify.sh
+```
+
+`verify.sh` changes nothing. It prints one `PASS` or `FAIL` line per check and exits non-zero if any check fails. It covers the OS, the versions, `daemon.json`, nginx, listening sockets, the `INPUT` chain against the parsed ranges, TLS file owners and modes, `.env` modes and key names, the `api` container's health and image tag, and both health checks. It prints key names and file modes, not secret values.
+
+`/healthz` does not query Postgres, so neither script shows that the node reaches the database.
+
+`verify.sh` reports `FAIL` on the application host, whose `.env` has further keys and whose `COMPOSE_FILE` lists `deploy/app/migrate.yaml`.
+
+### What the script does not do
+
+- It does not create the VM, or add its VNIC to the `app-nodes` network security group, which the node needs to reach Postgres; see [Private network access](#private-network-access).
+- It does not open ports in OCI, or change DNS or Cloudflare.
+- It does not run migrations, list `deploy/app/migrate.yaml`, or hold the owner's URL. Replacing the host that runs migrations takes the overlay and `MIGRATE_DATABASE_URL` in that host's `.env`, as in [Production environment](#production-environment), added after this script has run.
+- It does not set the hostname or write `/etc/cloud/cloud.cfg.d/99-hostname.cfg`.
+- It does not install the deploy key: the clone uses HTTPS.
+- It does not pin the Docker or nginx package versions. It installs what the repositories offer, and leaves installed packages as they are.
+- It does not remove `/etc/chambalink/secrets/` after it finishes.
 
 ## Backups
 

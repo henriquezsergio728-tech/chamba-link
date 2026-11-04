@@ -14,5 +14,5 @@ Terminate TLS in nginx with a Cloudflare Origin CA certificate, serve clients th
 - Cloudflare sends no expiry notifications for Origin CA certificates.
 - The certificate is trusted only by Cloudflare. A client that reaches the origin directly gets an untrusted-certificate error unless it trusts Cloudflare Origin CA, and browsers trust the site only while the records are proxied.
 - Full (strict) makes Cloudflare reject the origin if it presents a certificate that does not validate against Cloudflare Origin CA.
-- The private key has not left the VM.
+- The private key is on the application host and, root-only under `/etc/chambalink/secrets/` and `/etc/ssl/chambalink/`, on each node provisioned with [`ops/node/bootstrap.sh`](../../ops/node/bootstrap.sh) ([ADR 0016](0016-application-node-provisioning.md)).
 - The certificate is bound to the hostnames, not to the VM, so the same certificate and key work on any origin behind the Cloudflare proxy.
