@@ -42,4 +42,4 @@ Every step through 1300 requests per second had 0% failed requests and 0 dropped
 
 - No step through 1300 requests per second produced a `500` from nginx. Behavior at higher rates was not measured.
 - The upstream `keepalive_timeout` must stay below the API's idle timeout. If the API's `keepAliveTimeout` is lowered below 30 seconds, nginx can reuse a connection that the API has just closed.
-- `worker_connections` and `worker_rlimit_nofile` live in `/etc/nginx/nginx.conf`, outside the repository. They must be applied by hand on every host that runs this nginx config.
+- `worker_connections` and `worker_rlimit_nofile` live in `/etc/nginx/nginx.conf`, outside the repository. [`ops/node/bootstrap.sh`](../../ops/node/bootstrap.sh) sets them on every node it provisions ([ADR 0016](0016-application-node-provisioning.md)).
