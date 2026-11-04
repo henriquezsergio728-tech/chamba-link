@@ -369,7 +369,7 @@ The IPv4 `INPUT` chain on the application host, in order:
 
 The rules are persisted by editing `/etc/iptables/rules.v4`, not with `netfilter-persistent save`. The original stock rules were saved before Docker was installed, so Docker's chains are not part of the persisted rules. Running `sudo netfilter-persistent save` now that Docker is installed would also persist Docker's chains.
 
-On a provisioned node, `ops/node/bootstrap.sh` builds the chain before it installs Docker and runs `netfilter-persistent save`, so the first save holds no Docker chains. It saves again only when the `INPUT` chain differs from what it builds. On a node where Docker is running, that later save persists Docker's chains too, and the script prints a warning.
+On a provisioned node, `ops/node/bootstrap.sh` builds the chain before it installs Docker and runs `netfilter-persistent save`, so the first save holds no Docker chains. It saves again only when the `INPUT` chain, or the filter table's `INPUT` rules in `/etc/iptables/rules.v4`, differ from what it builds. On a node where Docker is running, that later save persists Docker's chains too, and the script prints a warning.
 
 ### Procedure as executed
 
@@ -534,7 +534,7 @@ In order, it:
 1. Checks the inputs, and exits 1 with a list of every problem before it changes anything.
 2. Installs `ca-certificates`, `curl`, `git`, `iptables-persistent` and `nginx`.
 3. Clones the repository to `/opt/chambalink` as `APP_USER`, or updates the clone to `REPO_REF`.
-4. Rebuilds the `INPUT` chain as in [Applied rules](#applied-rules), with any [extra 443 sources](#extra-443-sources), in one `iptables-restore` transaction, and saves it. It aborts if fewer than 10 ranges parse. `FORWARD`, `nat` and Docker's chains are not touched.
+4. Rebuilds the `INPUT` chain as in [Applied rules](#applied-rules), with any [extra 443 sources](#extra-443-sources), in one `iptables-restore` transaction, and saves it. If the live chain already matches, it rebuilds nothing, and saves only if `/etc/iptables/rules.v4` is missing or its filter table's `INPUT` rules differ. It aborts if fewer than 10 ranges parse. `FORWARD`, `nat` and Docker's chains are not touched.
 5. Installs Docker Engine and the Compose plugin from Docker's apt repository, writes `/etc/docker/daemon.json`, and adds `APP_USER` to the `docker` group.
 6. Installs the TLS files, sets the two limits in `/etc/nginx/nginx.conf`, removes the `default` site, links the site config, and reloads nginx if any of these changed and `nginx -t` passes.
 7. Writes `.env`, then runs `docker compose pull` and `docker compose up -d --wait`.
@@ -546,7 +546,7 @@ In order, it:
 sudo bash /opt/chambalink/ops/node/verify.sh
 ```
 
-`verify.sh` changes nothing. It prints one `PASS` or `FAIL` line per check and exits non-zero if any check fails. It covers the OS, the versions, `daemon.json`, nginx, listening sockets, the `INPUT` chain against the parsed ranges and the extra 443 sources, whose count it prints, that file's owner and mode, TLS file owners and modes, `.env` modes and key names, the `api` container's health and image tag, and both health checks. It prints key names and file modes, not secret values.
+`verify.sh` changes nothing. It prints one `PASS` or `FAIL` line per check and exits non-zero if any check fails. It covers the OS, the versions, `daemon.json`, nginx, listening sockets, the live `INPUT` chain and the `INPUT` rules persisted in `/etc/iptables/rules.v4` against the parsed ranges and the extra 443 sources, whose count it prints, that file's owner and mode, TLS file owners and modes, `.env` modes and key names, the `api` container's health and image tag, and both health checks. It prints key names and file modes, not secret values.
 
 `/healthz` does not query Postgres, so neither script shows that the node reaches the database.
 

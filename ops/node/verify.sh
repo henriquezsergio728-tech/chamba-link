@@ -8,6 +8,7 @@ APP_USER="${APP_USER:-ubuntu}"
 
 APP_DIR=/opt/chambalink
 EXTRA_443_SOURCES=/etc/chambalink/extra_443_sources
+PERSISTED_RULES=/etc/iptables/rules.v4
 TLS_DIR=/etc/ssl/chambalink
 NGINX_MAIN_CONFIG=/etc/nginx/nginx.conf
 NGINX_SITE_LINK=/etc/nginx/sites-enabled/chambalink.conf
@@ -71,6 +72,11 @@ extra_443_source_lines() {
 
 parse_extra_443_sources() {
   extra_443_source_lines "$1" | cut -d ' ' -f 2-
+}
+
+persisted_input_rules() {
+  [[ -f "$1" ]] || return 0
+  awk '$1 ~ /^\*/ { table = $1 } table == "*filter" && /^-A INPUT / { print }' "$1"
 }
 
 parse_server_name() {
@@ -191,6 +197,11 @@ check_firewall() {
     pass "iptables INPUT rules match what bootstrap builds"
   else
     failed "iptables INPUT rules match what bootstrap builds"
+  fi
+  if [[ "$(persisted_input_rules "$PERSISTED_RULES")" == "$expected" ]]; then
+    pass "persisted INPUT rules equal the expected rules"
+  else
+    failed "persisted INPUT rules equal the expected rules"
   fi
 }
 

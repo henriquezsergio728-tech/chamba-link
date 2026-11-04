@@ -21,7 +21,7 @@ See [Deployment](../deployment.md#provisioning-an-application-node).
 - Copying the TLS private key to a second node puts it on more than the host that generated it.
 - The firewall rules on a node follow the repository's copy of Cloudflare's ranges, so they are as current as that file. A change takes a new run of the script.
 - A run without `/etc/chambalink/extra_443_sources` removes the rules for its sources and saves the result.
-- A run after Docker is installed that changes the `INPUT` chain also persists Docker's chains ([Deployment](../deployment.md#persistence)).
+- A run after Docker is installed that changes the `INPUT` chain, or saves it because `/etc/iptables/rules.v4` differs, also persists Docker's chains ([Deployment](../deployment.md#persistence)).
 - `/healthz` does not query Postgres, so a passing run does not show that the node reaches the database.
 - The parsing and rule list are repeated in `verify.sh`, so that each script stands alone.
 - The script does not create the VM, join it to the `app-nodes` network security group, or change DNS or Cloudflare.
