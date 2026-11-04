@@ -501,6 +501,20 @@ ssh ubuntu@<node> 'sudo stat -c "%a %U %s %n" /etc/chambalink/secrets/*'
 
 The data passes through the pipes, not the terminal. The last command prints only modes, owners, sizes and names. Expected: `644 root` for `origin.pem`, `600 root` for `origin.key` and `database_url`, and sizes above `0`.
 
+### Extra 443 sources
+
+`/etc/chambalink/extra_443_sources` is optional and sits outside the secrets directory. It is owned by `root` with mode `600` or stricter, and holds one IPv4 CIDR per line. Blank lines and lines starting with `#` are ignored. An absent file, or one with no sources, means none.
+
+Each source gets one `INPUT` rule, after the `ssh` rule and before the Cloudflare ranges, in file order:
+
+```text
+-A INPUT -s <cidr> -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT
+```
+
+The script checks the file before it changes anything, and exits 1 with a list of every problem. A line must be exactly a dotted-quad CIDR, with no leading zeros and no other text. The script refuses a `/0` prefix, an address with bits set past its prefix, and a source listed twice, and it names lines by number. Neither script prints the file's contents.
+
+The rules follow the file at each run of the script, so a change takes a new run. A run without the file removes the rules and saves the result.
+
 ### Commands
 
 On the new node, fetch the script and run it, with `<sha>` replaced by the image's commit SHA. `sudo` drops the caller's environment, so the variables go after it:
@@ -520,7 +534,7 @@ In order, it:
 1. Checks the inputs, and exits 1 with a list of every problem before it changes anything.
 2. Installs `ca-certificates`, `curl`, `git`, `iptables-persistent` and `nginx`.
 3. Clones the repository to `/opt/chambalink` as `APP_USER`, or updates the clone to `REPO_REF`.
-4. Rebuilds the `INPUT` chain as in [Applied rules](#applied-rules), in one `iptables-restore` transaction, and saves it. It aborts if fewer than 10 ranges parse. `FORWARD`, `nat` and Docker's chains are not touched.
+4. Rebuilds the `INPUT` chain as in [Applied rules](#applied-rules), with any [extra 443 sources](#extra-443-sources), in one `iptables-restore` transaction, and saves it. It aborts if fewer than 10 ranges parse. `FORWARD`, `nat` and Docker's chains are not touched.
 5. Installs Docker Engine and the Compose plugin from Docker's apt repository, writes `/etc/docker/daemon.json`, and adds `APP_USER` to the `docker` group.
 6. Installs the TLS files, sets the two limits in `/etc/nginx/nginx.conf`, removes the `default` site, links the site config, and reloads nginx if any of these changed and `nginx -t` passes.
 7. Writes `.env`, then runs `docker compose pull` and `docker compose up -d --wait`.
@@ -532,7 +546,7 @@ In order, it:
 sudo bash /opt/chambalink/ops/node/verify.sh
 ```
 
-`verify.sh` changes nothing. It prints one `PASS` or `FAIL` line per check and exits non-zero if any check fails. It covers the OS, the versions, `daemon.json`, nginx, listening sockets, the `INPUT` chain against the parsed ranges, TLS file owners and modes, `.env` modes and key names, the `api` container's health and image tag, and both health checks. It prints key names and file modes, not secret values.
+`verify.sh` changes nothing. It prints one `PASS` or `FAIL` line per check and exits non-zero if any check fails. It covers the OS, the versions, `daemon.json`, nginx, listening sockets, the `INPUT` chain against the parsed ranges and the extra 443 sources, whose count it prints, that file's owner and mode, TLS file owners and modes, `.env` modes and key names, the `api` container's health and image tag, and both health checks. It prints key names and file modes, not secret values.
 
 `/healthz` does not query Postgres, so neither script shows that the node reaches the database.
 
