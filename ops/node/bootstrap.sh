@@ -13,6 +13,7 @@ APP_USER="${APP_USER:-ubuntu}"
 APP_DIR=/opt/chambalink
 SECRETS_DIR=/etc/chambalink/secrets
 EXTRA_443_SOURCES=/etc/chambalink/extra_443_sources
+PERSISTED_RULES=/etc/iptables/rules.v4
 TLS_DIR=/etc/ssl/chambalink
 NGINX_MAIN_CONFIG=/etc/nginx/nginx.conf
 NGINX_SITE_LINK=/etc/nginx/sites-enabled/chambalink.conf
@@ -95,6 +96,12 @@ extra_443_source_lines() {
 # The extra sources, in file order.
 parse_extra_443_sources() {
   extra_443_source_lines "$1" | cut -d ' ' -f 2-
+}
+
+# The INPUT rules of the filter table in an iptables-save file; nat has an INPUT chain too. No file, no lines.
+persisted_input_rules() {
+  [[ -f "$1" ]] || return 0
+  awk '$1 ~ /^\*/ { table = $1 } table == "*filter" && /^-A INPUT / { print }' "$1"
 }
 
 # The first name of the server_name line of the site config.
@@ -344,28 +351,33 @@ configure_firewall() {
   expected_input_rules "${sources[@]}" "${ranges[@]}" >"$WORK_DIR/input.expected"
   iptables -S INPUT >"$WORK_DIR/input.all"
   grep '^-A INPUT ' "$WORK_DIR/input.all" >"$WORK_DIR/input.current" || true
+  local outcome="firewall rebuilt and saved"
   if cmp -s "$WORK_DIR/input.expected" "$WORK_DIR/input.current"; then
-    log "firewall unchanged, ${#ranges[@]} Cloudflare ranges, ${#sources[@]} extra sources"
-    return 0
+    persisted_input_rules "$PERSISTED_RULES" >"$WORK_DIR/input.persisted"
+    if cmp -s "$WORK_DIR/input.expected" "$WORK_DIR/input.persisted"; then
+      log "firewall unchanged, ${#ranges[@]} Cloudflare ranges, ${#sources[@]} extra sources"
+      return 0
+    fi
+    outcome="firewall live rules were not saved, saved"
+  else
+    local policy
+    policy="$(awk '$1 == "-P" { print $3 }' "$WORK_DIR/input.all")"
+    {
+      echo "*filter"
+      echo ":INPUT $policy [0:0]"
+      echo "-F INPUT"
+      cat "$WORK_DIR/input.expected"
+      echo "COMMIT"
+    } >"$WORK_DIR/input.restore"
+    iptables-restore --noflush --test <"$WORK_DIR/input.restore"
+    iptables-restore --noflush <"$WORK_DIR/input.restore"
   fi
-
-  local policy
-  policy="$(awk '$1 == "-P" { print $3 }' "$WORK_DIR/input.all")"
-  {
-    echo "*filter"
-    echo ":INPUT $policy [0:0]"
-    echo "-F INPUT"
-    cat "$WORK_DIR/input.expected"
-    echo "COMMIT"
-  } >"$WORK_DIR/input.restore"
-  iptables-restore --noflush --test <"$WORK_DIR/input.restore"
-  iptables-restore --noflush <"$WORK_DIR/input.restore"
 
   if iptables -S | grep -q '^-N DOCKER'; then
     warn "Docker is running, so this save also persists its chains"
   fi
   netfilter-persistent save >/dev/null
-  log "firewall rebuilt and saved, ${#ranges[@]} Cloudflare ranges, ${#sources[@]} extra sources"
+  log "$outcome, ${#ranges[@]} Cloudflare ranges, ${#sources[@]} extra sources"
 }
 
 install_docker() {
