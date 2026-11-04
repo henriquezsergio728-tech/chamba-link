@@ -12,7 +12,7 @@ Both hosts are Oracle Cloud Infrastructure Always Free VMs.
 | --- | --- | --- |
 | Shape | VM.Standard.A1.Flex (Ampere A1, arm64), 1 OCPU, 6 GB RAM | VM.Standard.E2.1.Micro (x86_64) |
 | Runs | nginx on the host; the `api` container | The `db` container |
-| Compose files | `compose.prod.yaml` and `deploy/app/compose.yaml` | `deploy/db/compose.yaml` |
+| Compose files | `compose.prod.yaml`, `deploy/app/compose.yaml` and `deploy/app/migrate.yaml` | `deploy/db/compose.yaml` |
 | Network security group | `app-nodes` | `db-host` |
 
 Application host:
@@ -67,13 +67,13 @@ The application host's clone uses a read-only GitHub deploy key scoped to this r
 
 | Variable | Purpose |
 | --- | --- |
-| `COMPOSE_FILE` | `compose.prod.yaml:deploy/app/compose.yaml`, so every `docker compose` command in `/opt/chambalink` uses both files and runs only `api` |
+| `COMPOSE_FILE` | `compose.prod.yaml:deploy/app/compose.yaml:deploy/app/migrate.yaml`, so every `docker compose` command in `/opt/chambalink` uses the three files, `docker compose up` runs only `api`, and `docker compose run --rm migrate` runs the migrator |
 | `DATABASE_URL` | `postgres://chambalink_app:<password>@<database host private address>:5432/<database>`, the API's role; see [Database roles](#database-roles) |
-| `MIGRATE_DATABASE_URL` | `postgres://<owner user>:<owner password>@<database host private address>:5432/<database>`, the owner's URL, used only by the `migrate` service |
+| `MIGRATE_DATABASE_URL` | `postgres://<owner user>:<owner password>@<database host private address>:5432/<database>`, the owner's URL, used only by the `migrate` service in `deploy/app/migrate.yaml` |
 | `API_TAG` | Full commit SHA of a published image |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Database user, password (generated with `openssl rand -hex 24`) and name. `compose.prod.yaml` ignores them while `DATABASE_URL` is set; step 6 of [Moving the database to another host](#moving-the-database-to-another-host) builds `DATABASE_URL` from them |
 
-`compose.prod.yaml` passes `DATABASE_URL` to the `api` service and fails if `API_TAG` is unset. It defines no other variable for the `api` service, so the container runs with the default `DB_POOL_MAX` of 5 even when `.env` sets it. The `migrate` service, in the profile `migrate`, receives `MIGRATE_DATABASE_URL` as its `DATABASE_URL`; `docker compose up` does not start it. Compose interpolates that service even when the profile is not active, so every `docker compose` command in `/opt/chambalink` fails while `MIGRATE_DATABASE_URL` is unset. The database host's `.env` is described in [Database host](#database-host).
+`compose.prod.yaml` passes `DATABASE_URL` to the `api` service and fails if `API_TAG` is unset. It defines no other variable for the `api` service, so the container runs with the default `DB_POOL_MAX` of 5 even when `.env` sets it. [`deploy/app/migrate.yaml`](../deploy/app/migrate.yaml) defines the `migrate` service, in the profile `migrate`, which receives `MIGRATE_DATABASE_URL` as its `DATABASE_URL`; `docker compose up` does not start it. Compose interpolates that service even when the profile is not active, so while `COMPOSE_FILE` lists `deploy/app/migrate.yaml`, every `docker compose` command fails if `MIGRATE_DATABASE_URL` is unset. The file is listed in `COMPOSE_FILE` only on the host that runs migrations. A node that runs only the API sets `COMPOSE_FILE=compose.prod.yaml:deploy/app/compose.yaml` and does not need `MIGRATE_DATABASE_URL` in its `.env`; on that node `docker compose run --rm migrate` fails with `no such service: migrate`. The database host's `.env` is described in [Database host](#database-host).
 
 Check the file mode:
 
@@ -537,7 +537,7 @@ The clone's `.env` on the database host defines:
 
 Docker Compose reads these from `.env` in the directory where `docker compose` runs, so the clone's `.env` serves `docker compose` commands and `ops/backup.sh` alike. The backup units and `/etc/chambalink/backup.env` are installed as in [Backups](#backups).
 
-The application host runs only the `api` service and reaches the database over the private network. It uses `compose.prod.yaml` with [`deploy/app/compose.yaml`](../deploy/app/compose.yaml), which removes the api's `depends_on` on `db`, and sets `DATABASE_URL`; see [Production environment](#production-environment).
+The application host runs only the `api` service and reaches the database over the private network. It uses `compose.prod.yaml` with [`deploy/app/compose.yaml`](../deploy/app/compose.yaml), which removes the api's `depends_on` on `db`, and [`deploy/app/migrate.yaml`](../deploy/app/migrate.yaml), which adds the `migrate` service, and sets `DATABASE_URL`; see [Production environment](#production-environment).
 
 `compose.prod.yaml` uses `DATABASE_URL` when it is set and otherwise builds it from the `POSTGRES_*` variables for the `db` service. With this file list, `docker compose up -d --wait` starts only `api`, and `docker compose run --rm migrate` runs the migrator against the database host. `deploy/app/compose.yaml` uses the `!reset` tag, which needs Docker Compose 2.24.0 or later.
 
@@ -641,14 +641,14 @@ This procedure has been executed once, to move the database from the application
 
 5. Run the exact row count query from [Restoring from a backup](#restoring-from-a-backup) on the source host and on the target host, with `TARGET_DB` set to the database name, and diff the two outputs. Expected: no differences.
 
-6. On the application host, append `DATABASE_URL` and switch `COMPOSE_FILE` to the application-node files:
+6. On the application host, append `DATABASE_URL` and switch `COMPOSE_FILE` to the application host's files, including the migrator overlay, as in [Production environment](#production-environment):
 
    ```bash
    cd /opt/chambalink
    DB_ADDR=<target host private address>
    [ -z "$(tail -c1 .env)" ] || echo >> .env
    (. ./.env && printf 'DATABASE_URL=postgres://%s:%s@%s:5432/%s\n' "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$DB_ADDR" "$POSTGRES_DB") >> .env
-   sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.prod.yaml:deploy/app/compose.yaml|' .env
+   sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=compose.prod.yaml:deploy/app/compose.yaml:deploy/app/migrate.yaml|' .env
    grep -c '^DATABASE_URL=' .env
    docker compose up -d --wait
    ```

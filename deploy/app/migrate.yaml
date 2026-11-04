@@ -1,0 +1,9 @@
+# Migrator overlay for compose.prod.yaml: listed in COMPOSE_FILE only on the host that runs migrations.
+services:
+  # The migrator connects as the table owner; only this service receives MIGRATE_DATABASE_URL. Run with docker compose run --rm migrate.
+  migrate:
+    image: ghcr.io/henriquezsergio728-tech/chamba-link-api:${API_TAG:?set API_TAG in .env}
+    profiles: ["migrate"]
+    command: ["node", "dist/migrate.js"]
+    environment:
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL in .env}

@@ -27,7 +27,7 @@ flowchart LR
 | Component | Source | Notes |
 | --- | --- | --- |
 | API | `api/src/`, `Dockerfile` | Fastify on Node 24. Serves `GET /healthz`, `GET /v1/openapi.json`, the account and session routes, the provider and catalog routes, and the booking routes. See [API conventions](#api-conventions), [Accounts and sessions](#accounts-and-sessions), [Providers and catalog](#providers-and-catalog) and [Bookings](#bookings). |
-| Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. In production it runs as the `migrate` service in `compose.prod.yaml`, connected as the table owner; the API connects as `chambalink_app`. See [ADR 0013](decisions/0013-least-privilege-database-role.md). |
+| Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. In production it runs as the `migrate` service in `deploy/app/migrate.yaml`, connected as the table owner; the API connects as `chambalink_app`. See [ADR 0013](decisions/0013-least-privilege-database-role.md). |
 | Database | `deploy/db/compose.yaml` in production, `compose.yaml` locally | `postgres:16` pinned to a digest, with the named volume `pgdata`. In production, started with `max_connections=50`, `shared_buffers=128MB` and `effective_cache_size=384MB`. |
 | Edge proxy | Cloudflare (Free plan) | DNS for `chambalink.online`; proxies the apex and `www`. Configured in the Cloudflare dashboard, not in the repo. |
 | Reverse proxy | `deploy/nginx/chambalink.conf`, `deploy/nginx/cloudflare-real-ip.conf` | nginx installed on the host, not in a container. Terminates TLS. |
@@ -221,9 +221,9 @@ Recorded in [ADR 0014](decisions/0014-scheduling-model.md). The routes are in `a
 | `NODE_ENV` | `api/src/app.ts` (logging is off when `test`), `api/src/auth/session.ts` (the session cookie is `Secure` when `production`) | unset | Image sets `production` |
 | `DATABASE_URL` | `api/src/server.ts` and `api/src/migrate.ts` (required, must start with `postgres://` or `postgresql://`), `api/drizzle.config.ts`, booking, database plugin, auth, provider and catalog tests | none | `.env` locally; in `compose.prod.yaml`, the `DATABASE_URL` variable when set, otherwise built from `POSTGRES_*`. Set in the application host's `.env` to the database host's private address |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `postgres:16` image, Compose interpolation | none | `.env` locally and on the database host |
-| `MIGRATE_DATABASE_URL` | `compose.prod.yaml`, as `DATABASE_URL` of the `migrate` service only | required by that file | Application host `.env`: the owner's URL |
-| `API_TAG` | `compose.prod.yaml` image tags of `api` and `migrate` | required | Application host `.env` |
-| `COMPOSE_FILE` | Docker Compose | `compose.yaml` | `compose.prod.yaml:deploy/app/compose.yaml` in the application host's `.env`; `deploy/db/compose.yaml` in the database host's `.env` |
+| `MIGRATE_DATABASE_URL` | `deploy/app/migrate.yaml`, as `DATABASE_URL` of the `migrate` service only | required by that file | Application host `.env`: the owner's URL. Not needed on a node whose `COMPOSE_FILE` does not list `deploy/app/migrate.yaml` |
+| `API_TAG` | Image tags of `api` in `compose.prod.yaml` and `migrate` in `deploy/app/migrate.yaml` | required | Application host `.env` |
+| `COMPOSE_FILE` | Docker Compose | `compose.yaml` | `compose.prod.yaml:deploy/app/compose.yaml:deploy/app/migrate.yaml` in the application host's `.env`, which runs migrations; `compose.prod.yaml:deploy/app/compose.yaml` on a node that runs only the API; `deploy/db/compose.yaml` in the database host's `.env` |
 | `DB_BIND_ADDR` | `deploy/db/compose.yaml` port binding | required by that file | Database host `.env`: the host's private address |
 
 `compose.prod.yaml` places `POSTGRES_PASSWORD` inside a URL, so the password must contain only URL-safe characters.
