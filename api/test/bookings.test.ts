@@ -1,5 +1,5 @@
 import { DrizzleQueryError } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, onTestFinished, test, vi } from "vitest";
 import { fromLocal, toLocal } from "../src/time.js";
 import { type Actor, errorPaths, harness, providerWithProfile } from "./harness.js";
 
@@ -126,6 +126,9 @@ describe("POST /v1/bookings", () => {
   });
 
   test("a hold never outlasts the start time, and the link is null without a number", async () => {
+    // 10:00 local on a Tuesday. The start is two hours from now, and from 21:00 to 21:30 local that is 23:30, where the service cannot end by midnight.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-03T16:00:00Z") });
+    onTestFinished(() => void vi.useRealTimers());
     const { service } = await setup({ whatsapp: false });
     const start = new Date(Math.ceil((Date.now() + 2 * HOUR) / (30 * 60_000)) * 30 * 60_000);
     const res = await book(await h.actor("client"), service.id, start);
