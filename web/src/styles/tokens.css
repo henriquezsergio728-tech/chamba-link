@@ -1,0 +1,155 @@
+/*
+ * ChambaLink design tokens.
+ *
+ * Three layers. Components read only layers 2 and 3.
+ *   1. Palette   --cl-*       literal colors, named after the brand manual.
+ *   2. Semantic  --color-*    what a color is for (page, text, primary action, error).
+ *   3. Domain    --cat-*, --status-*   category families and booking statuses from api/src/domain.ts
+ *                              and the booking_status enum in api/src/db/schema.ts.
+ *
+ * Every text/background pair declared in web/test/pairs.mjs is checked against WCAG 2.x
+ * contrast thresholds by `node --test` in web/.
+ *
+ * Light scheme only. Dark mode is not defined.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* 1. Palette: brand */
+  /* --cl-olivo and --cl-cobre must not be used as text on --cl-arena or --color-surface-subtle (4.39:1 and 4.21:1, below AA). */
+  --cl-monte: #283618;
+  --cl-crema: #fefae0;
+  --cl-olivo: #606c38;
+  --cl-anil: #3d4f7c;
+  --cl-cobre: #9a5a1e;
+  --cl-maiz: #dda15e;
+
+  /* 1. Palette: neutrals and semantic */
+  --cl-blanco: #ffffff;
+  --cl-arena: #e9e3c4;
+  --cl-ceniza: #5c604e;
+  --cl-achiote: #9b2c1f;
+
+  /* 1. Palette: tints, for chips and quiet backgrounds behind the full color as text */
+  --cl-olivo-tint: #edf0dc;
+  --cl-anil-tint: #e9ecf5;
+  --cl-cobre-tint: #faeee2;
+  --cl-maiz-tint: #f8e8d2;
+  --cl-achiote-tint: #f9e4df;
+
+  /* 2. Semantic: surfaces and text */
+  --color-bg: var(--cl-crema);
+  --color-surface: var(--cl-blanco);
+  --color-surface-subtle: var(--cl-arena);
+  --color-text: var(--cl-monte);
+  --color-text-muted: var(--cl-ceniza);
+  --color-border: var(--cl-arena);
+  --color-border-strong: var(--cl-monte);
+  /* Text field border. Ceniza, not Arena: Arena on white is 1.29:1 and WCAG 1.4.11 needs 3:1. */
+  --color-input-border: var(--cl-ceniza);
+
+  /* 2. Semantic: actions. One primary action per screen. */
+  --color-primary: var(--cl-olivo);
+  --color-on-primary: var(--cl-crema);
+  --color-accent: var(--cl-cobre);
+  --color-on-accent: var(--cl-crema);
+  --color-highlight: var(--cl-maiz);
+  --color-on-highlight: var(--cl-monte);
+  --color-focus: var(--cl-anil);
+
+  /* 2. Semantic: feedback */
+  --color-danger: var(--cl-achiote);
+  --color-danger-bg: var(--cl-achiote-tint);
+  --color-on-danger: var(--cl-crema);
+
+  /* 3. Category families. Color is never the only cue: each category also has an icon and a label. */
+  --cat-instalaciones-bg: var(--cl-anil);
+  --cat-instalaciones-fg: var(--cl-crema);
+  --cat-instalaciones-tint: var(--cl-anil-tint);
+  --cat-instalaciones-tint-fg: var(--cl-anil);
+
+  --cat-hogar-bg: var(--cl-olivo);
+  --cat-hogar-fg: var(--cl-crema);
+  --cat-hogar-tint: var(--cl-olivo-tint);
+  --cat-hogar-tint-fg: var(--cl-olivo);
+
+  --cat-obra-bg: var(--cl-cobre);
+  --cat-obra-fg: var(--cl-crema);
+  --cat-obra-tint: var(--cl-cobre-tint);
+  --cat-obra-tint-fg: var(--cl-cobre);
+
+  --cat-personas-bg: var(--cl-maiz);
+  --cat-personas-fg: var(--cl-monte);
+  --cat-personas-tint: var(--cl-maiz-tint);
+  --cat-personas-tint-fg: var(--cl-monte);
+
+  --cat-otros-bg: var(--cl-arena);
+  --cat-otros-fg: var(--cl-monte);
+  --cat-otros-tint: var(--cl-arena);
+  --cat-otros-tint-fg: var(--cl-monte);
+
+  /* 3. Booking statuses */
+  --status-pending-bg: var(--cl-maiz-tint);
+  --status-pending-fg: var(--cl-monte);
+  --status-confirmed-bg: var(--cl-olivo);
+  --status-confirmed-fg: var(--cl-crema);
+  --status-completed-bg: var(--cl-monte);
+  --status-completed-fg: var(--cl-crema);
+  --status-declined-bg: var(--cl-achiote-tint);
+  --status-declined-fg: var(--cl-achiote);
+  --status-cancelled-bg: var(--cl-achiote-tint);
+  --status-cancelled-fg: var(--cl-achiote);
+  --status-expired-bg: var(--cl-arena);
+  --status-expired-fg: var(--cl-ceniza);
+
+  /* Typography. The families fall back to system fonts until the font files are self-hosted. */
+  --font-display: "Archivo", "Arial", system-ui, sans-serif;
+  --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --weight-regular: 400;
+  --weight-bold: 700;
+  --weight-display: 800;
+
+  --text-xs: 0.75rem;   /* 12px: metadata only, never body */
+  --text-sm: 0.875rem;  /* 14px: secondary lines */
+  --text-md: 1rem;      /* 16px: body minimum */
+  --text-lg: 1.125rem;  /* 18px */
+  --text-xl: 1.375rem;  /* 22px: screen titles */
+  --text-2xl: 1.75rem;  /* 28px */
+  --text-3xl: 2.5rem;   /* 40px */
+  --text-numeral: 3.5rem; /* 56px: the date on the agenda */
+  --leading-tight: 1.1;
+  --leading-body: 1.5;
+
+  /* Spacing: 4px grid */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+
+  /* Shape */
+  --radius-control: 14px;
+  --radius-card: 20px;
+  --radius-sheet: 28px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+
+  /* Touch: every tappable element is at least this tall and wide */
+  --touch-min: 48px;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}
