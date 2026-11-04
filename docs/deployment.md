@@ -260,7 +260,7 @@ Expected: `remoteAddress` is the public address of the machine that sent the req
 
 ## nginx
 
-The site config is versioned at [`deploy/nginx/chambalink.conf`](../deploy/nginx/chambalink.conf) and described in [Architecture](architecture.md#nginx). It includes [`deploy/nginx/cloudflare-real-ip.conf`](../deploy/nginx/cloudflare-real-ip.conf) by its absolute path in the clone.
+The site config is versioned at [`deploy/nginx/chambalink.conf`](../deploy/nginx/chambalink.conf) and described in [Architecture](architecture.md#nginx). It serves the landing page from `web/` in the clone, so `git pull --ff-only` updates the page without a reload. It includes [`deploy/nginx/cloudflare-real-ip.conf`](../deploy/nginx/cloudflare-real-ip.conf) by its absolute path in the clone.
 
 The site is enabled by a symlink from `/etc/nginx/sites-enabled/` to the file in the clone. After any change to either file:
 

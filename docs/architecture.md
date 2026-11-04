@@ -16,6 +16,7 @@ flowchart LR
     cf -->|HTTPS :443, IPv4| nginx
     subgraph apphost[Application host, arm64]
         nginx[nginx :80 / :443] --> api[api container :3000]
+        nginx --> files[Landing page files in the clone]
     end
     subgraph dbhost[Database host, x86_64]
         db[(Postgres container :5432)]
@@ -30,7 +31,7 @@ flowchart LR
 | Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. In production it runs as the `migrate` service in `deploy/app/migrate.yaml`, connected as the table owner; the API connects as `chambalink_app`. See [ADR 0013](decisions/0013-least-privilege-database-role.md). |
 | Database | `deploy/db/compose.yaml` in production, `compose.yaml` locally | `postgres:16` pinned to a digest, with the named volume `pgdata`. In production, started with `max_connections=50`, `shared_buffers=128MB` and `effective_cache_size=384MB`. |
 | Edge proxy | Cloudflare (Free plan) | DNS for `chambalink.online`; proxies the apex and `www`. Configured in the Cloudflare dashboard, not in the repo. |
-| Reverse proxy | `deploy/nginx/chambalink.conf`, `deploy/nginx/cloudflare-real-ip.conf` | nginx installed on the host, not in a container. Terminates TLS. |
+| Reverse proxy | `deploy/nginx/chambalink.conf`, `deploy/nginx/cloudflare-real-ip.conf` | nginx installed on the host, not in a container. Terminates TLS and serves the landing page from `web/`. |
 | CI pipeline | `.github/workflows/ci.yml` | Jobs `test` and `image`. See [CI/CD](ci-cd.md). |
 | Registry | `ghcr.io/henriquezsergio728-tech/chamba-link-api` | Public, `linux/arm64` only. |
 
@@ -44,7 +45,7 @@ Production is two hosts. The application host, an arm64 VM.Standard.A1.Flex, run
 2. Cloudflare terminates the client's TLS connection. With Always Use HTTPS on, Cloudflare answers plain HTTP requests with a `301` redirect to HTTPS.
 3. Cloudflare connects to the application host on port 443 over IPv4 and validates the origin certificate (SSL/TLS mode Full (strict)).
 4. nginx terminates TLS with a Cloudflare Origin CA certificate. For peers in Cloudflare's published ranges it replaces `$remote_addr` with the `CF-Connecting-IP` header (`deploy/nginx/cloudflare-real-ip.conf`).
-5. nginx proxies the request to the upstream `chambalink_api`, `127.0.0.1:3000`, over HTTP/1.1, reusing an idle connection from the keepalive cache when one is available, with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set and an empty `Connection` header.
+5. For `/`, `/landing.css`, `/styles/tokens.css` and `/brand/*.svg`, nginx serves files from `web/` in the clone; see [nginx](#nginx). It proxies every other request to the upstream `chambalink_api`, `127.0.0.1:3000`, over HTTP/1.1, reusing an idle connection from the keepalive cache when one is available, with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set and an empty `Connection` header.
 6. Docker forwards `127.0.0.1:3000` to port 3000 of the `api` container, where Fastify listens on `0.0.0.0`. Fastify takes `request.ip` from `X-Forwarded-For` because its peer is in a loopback or private range (`trustProxy: "loopback,uniquelocal"`).
 7. For the account, session, provider, catalog and booking routes, the API queries Postgres over the private network at the database host's private address, port 5432, as set in `DATABASE_URL`. The connection is not encrypted with TLS.
 
@@ -59,7 +60,9 @@ The application host has no IPv6 address. Cloudflare serves clients over IPv4 an
 - `listen 80 default_server` and `listen 443 ssl http2`, each for IPv4 and IPv6.
 - `server_name chambalink.online www.chambalink.online`. `www` is not redirected to the apex.
 - `ssl_certificate /etc/ssl/chambalink/origin.pem`, `ssl_certificate_key /etc/ssl/chambalink/origin.key`, `ssl_protocols TLSv1.2 TLSv1.3`.
-- One `location /` that proxies to `http://chambalink_api` with `proxy_http_version 1.1` and `proxy_set_header Connection ""`, so that connections to the API are reused. See [Deployment](deployment.md#upstream-keepalive) and [ADR 0015](decisions/0015-nginx-connection-reuse-and-limits.md).
+- `location = /`, which serves `/opt/chambalink/web/public/index.html` with a `Content-Security-Policy` that allows only same-origin styles and images, `X-Content-Type-Options nosniff` and `Referrer-Policy strict-origin-when-cross-origin`.
+- `location = /landing.css` from `/opt/chambalink/web/public`, and `location = /styles/tokens.css` and `location ~ ^/brand/[a-z-]+\.svg$` from `/opt/chambalink/web/src`. Other files under `web/src/brand/` are not served.
+- `location /` for every other path, which proxies to `http://chambalink_api` with `proxy_http_version 1.1` and `proxy_set_header Connection ""`, so that connections to the API are reused. See [Deployment](deployment.md#upstream-keepalive) and [ADR 0015](decisions/0015-nginx-connection-reuse-and-limits.md).
 
 Port 80 is the `default_server`, so it answers plain HTTP for any `Host`. The host firewall blocks port 80 from outside the application host, so it is reachable on loopback only. Port 443 has no other server block, so nginx uses this one for every TLS connection on it.
 
