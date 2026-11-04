@@ -12,6 +12,7 @@ APP_USER="${APP_USER:-ubuntu}"
 
 APP_DIR=/opt/chambalink
 SECRETS_DIR=/etc/chambalink/secrets
+EXTRA_443_SOURCES=/etc/chambalink/extra_443_sources
 TLS_DIR=/etc/ssl/chambalink
 NGINX_MAIN_CONFIG=/etc/nginx/nginx.conf
 NGINX_SITE_LINK=/etc/nginx/sites-enabled/chambalink.conf
@@ -60,6 +61,20 @@ mode_is_private() {
   (((8#$mode & 8#077) == 0))
 }
 
+# A dotted-quad CIDR with a prefix of 0 to 32. Leading zeros are refused, because iptables prints the address without them.
+valid_ipv4_cidr() {
+  local octet='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+  local pattern="^$octet\\.$octet\\.$octet\\.$octet/(3[0-2]|[12]?[0-9])$"
+  [[ "$1" =~ $pattern ]]
+}
+
+# No address bit past the prefix. iptables -S prints the masked network, so any other form never equals the rule list.
+cidr_is_network() {
+  local prefix="${1#*/}" a b c d
+  IFS=. read -r a b c d <<<"${1%/*}"
+  ((((a << 24 | b << 16 | c << 8 | d) & ((1 << (32 - prefix)) - 1)) == 0))
+}
+
 # The IPv4 ranges of the set_real_ip_from lines, in file order.
 parse_cloudflare_ranges() {
   awk '
@@ -69,6 +84,17 @@ parse_cloudflare_ranges() {
       if (value ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/) print value
     }
   ' "$1"
+}
+
+# The lines of the extra sources file that are neither blank nor comments, each after its line number. No file, no lines.
+extra_443_source_lines() {
+  [[ -f "$1" ]] || return 0
+  awk '!/^[ \t\r]*$/ && !/^#/ { print FNR, $0 }' "$1"
+}
+
+# The extra sources, in file order.
+parse_extra_443_sources() {
+  extra_443_source_lines "$1" | cut -d ' ' -f 2-
 }
 
 # The first name of the server_name line of the site config.
@@ -83,7 +109,7 @@ parse_server_name() {
   ' "$1"
 }
 
-# The INPUT rules as iptables -S prints them, for the ranges given as arguments.
+# The INPUT rules as iptables -S prints them, for the sources given as arguments: the extra ones, then Cloudflare's.
 expected_input_rules() {
   local range
   echo "-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT"
@@ -178,6 +204,42 @@ check_secret_file() {
   fi
 }
 
+# The file is optional. Problems name line numbers, so that its contents are not printed.
+check_extra_443_sources() {
+  local path="$EXTRA_443_SOURCES"
+  if [[ ! -e "$path" && ! -L "$path" ]]; then
+    return 0
+  fi
+  if [[ -L "$path" || ! -f "$path" ]]; then
+    PROBLEMS+=("$path must be a regular file")
+    return 0
+  fi
+  if [[ "$(stat -c '%U' "$path")" != "root" ]]; then
+    PROBLEMS+=("$path is not owned by root")
+  fi
+  if ! mode_is_private "$(stat -c '%a' "$path")"; then
+    PROBLEMS+=("$path must have mode 0600 or stricter")
+  fi
+
+  local entry number source
+  local -A seen=()
+  while IFS= read -r entry; do
+    number="${entry%% *}"
+    source="${entry#* }"
+    if ! valid_ipv4_cidr "$source"; then
+      PROBLEMS+=("$path line $number is not an IPv4 CIDR")
+    elif [[ "${source#*/}" == "0" ]]; then
+      PROBLEMS+=("$path line $number has a /0 prefix")
+    elif ! cidr_is_network "$source"; then
+      PROBLEMS+=("$path line $number has address bits past its prefix")
+    elif [[ -n "${seen[$source]:-}" ]]; then
+      PROBLEMS+=("$path line $number repeats line ${seen[$source]}")
+    else
+      seen[$source]="$number"
+    fi
+  done < <(extra_443_source_lines "$path")
+}
+
 # Reads and changes nothing but its own variables, and reports every problem before exiting.
 preflight() {
   PROBLEMS=()
@@ -208,6 +270,7 @@ preflight() {
   if [[ -s "$SECRETS_DIR/database_url" ]] && ! valid_database_url "$(<"$SECRETS_DIR/database_url")"; then
     PROBLEMS+=("$SECRETS_DIR/database_url must be one postgres:// URL with only URL-safe characters")
   fi
+  check_extra_443_sources
 
   # This script writes .env without the owner URL, so running it on the host that runs migrations would lose it.
   if [[ -f "$APP_DIR/.env" ]] && grep -q '^MIGRATE_DATABASE_URL=' "$APP_DIR/.env"; then
@@ -271,17 +334,18 @@ clone_repository() {
 # Runs before Docker is installed, so that the first save holds no Docker chains. Only INPUT is rebuilt, in one
 # iptables-restore transaction, so no established session or ssh connection meets a partly built chain.
 configure_firewall() {
-  local ranges=()
+  local ranges=() sources=()
   mapfile -t ranges < <(parse_cloudflare_ranges "$APP_DIR/deploy/nginx/cloudflare-real-ip.conf")
   if ((${#ranges[@]} < MIN_CLOUDFLARE_RANGES)); then
     fail "found ${#ranges[@]} Cloudflare IPv4 ranges, expected at least $MIN_CLOUDFLARE_RANGES"
   fi
+  mapfile -t sources < <(parse_extra_443_sources "$EXTRA_443_SOURCES")
 
-  expected_input_rules "${ranges[@]}" >"$WORK_DIR/input.expected"
+  expected_input_rules "${sources[@]}" "${ranges[@]}" >"$WORK_DIR/input.expected"
   iptables -S INPUT >"$WORK_DIR/input.all"
   grep '^-A INPUT ' "$WORK_DIR/input.all" >"$WORK_DIR/input.current" || true
   if cmp -s "$WORK_DIR/input.expected" "$WORK_DIR/input.current"; then
-    log "firewall unchanged, ${#ranges[@]} Cloudflare ranges"
+    log "firewall unchanged, ${#ranges[@]} Cloudflare ranges, ${#sources[@]} extra sources"
     return 0
   fi
 
@@ -301,7 +365,7 @@ configure_firewall() {
     warn "Docker is running, so this save also persists its chains"
   fi
   netfilter-persistent save >/dev/null
-  log "firewall rebuilt and saved, ${#ranges[@]} Cloudflare ranges"
+  log "firewall rebuilt and saved, ${#ranges[@]} Cloudflare ranges, ${#sources[@]} extra sources"
 }
 
 install_docker() {

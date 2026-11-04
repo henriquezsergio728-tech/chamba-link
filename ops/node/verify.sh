@@ -7,6 +7,7 @@ set -uo pipefail
 APP_USER="${APP_USER:-ubuntu}"
 
 APP_DIR=/opt/chambalink
+EXTRA_443_SOURCES=/etc/chambalink/extra_443_sources
 TLS_DIR=/etc/ssl/chambalink
 NGINX_MAIN_CONFIG=/etc/nginx/nginx.conf
 NGINX_SITE_LINK=/etc/nginx/sites-enabled/chambalink.conf
@@ -61,6 +62,15 @@ parse_cloudflare_ranges() {
       if (value ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/) print value
     }
   ' "$1"
+}
+
+extra_443_source_lines() {
+  [[ -f "$1" ]] || return 0
+  awk '!/^[ \t\r]*$/ && !/^#/ { print FNR, $0 }' "$1"
+}
+
+parse_extra_443_sources() {
+  extra_443_source_lines "$1" | cut -d ' ' -f 2-
 }
 
 parse_server_name() {
@@ -148,7 +158,9 @@ api_port_on_loopback_only() {
 }
 
 check_firewall() {
-  local ranges=() rules expected allowed
+  local ranges=() sources=() rules expected allowed
+  mapfile -t sources < <(parse_extra_443_sources "$EXTRA_443_SOURCES")
+  pass "extra 443 sources: ${#sources[@]}"
   mapfile -t ranges < <(parse_cloudflare_ranges "$CLOUDFLARE_CONFIG")
   if ((${#ranges[@]} < MIN_CLOUDFLARE_RANGES)); then
     failed "Cloudflare ranges parsed from the repository: ${#ranges[@]}"
@@ -157,13 +169,13 @@ check_firewall() {
   pass "Cloudflare ranges parsed from the repository: ${#ranges[@]}"
 
   rules="$(iptables -S INPUT | grep '^-A INPUT ')"
-  expected="$(expected_input_rules "${ranges[@]}")"
+  expected="$(expected_input_rules "${sources[@]}" "${ranges[@]}")"
 
   allowed="$(sed -n 's/^-A INPUT -s \([^ ]*\) .*--dport 443 .*/\1/p' <<<"$rules" | sort)"
-  if [[ "$allowed" == "$(printf '%s\n' "${ranges[@]}" | sort)" ]]; then
-    pass "iptables 443 allow rules equal the parsed ranges"
+  if [[ "$allowed" == "$(printf '%s\n' "${sources[@]}" "${ranges[@]}" | sort)" ]]; then
+    pass "iptables 443 allow rules equal the parsed ranges and extra sources"
   else
-    failed "iptables 443 allow rules equal the parsed ranges"
+    failed "iptables 443 allow rules equal the parsed ranges and extra sources"
   fi
   if grep -qx -- "-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT" <<<"$rules"; then
     pass "iptables ssh rule present"
@@ -189,6 +201,24 @@ check_file_owner_and_mode() {
     pass "$path is $actual"
   else
     failed "$path is ${actual:-missing}, expected $expected"
+  fi
+}
+
+# The file is optional, and any mode of 0600 or stricter passes.
+check_extra_443_file() {
+  local path="$EXTRA_443_SOURCES" actual
+  if [[ ! -e "$path" && ! -L "$path" ]]; then
+    return 0
+  fi
+  if [[ -L "$path" || ! -f "$path" ]]; then
+    failed "$path is a regular file"
+    return 0
+  fi
+  actual="$(stat -c '%U %a' "$path")"
+  if [[ "${actual%% *}" == "root" ]] && (((8#${actual##* } & 8#077) == 0)); then
+    pass "$path is $actual"
+  else
+    failed "$path is $actual, expected root and 0600 or stricter"
   fi
 }
 
@@ -265,6 +295,7 @@ main() {
   check "listening on 443" listens_on_443
   check "3000 listening on loopback only" api_port_on_loopback_only
   check_firewall
+  check_extra_443_file
   check_file_owner_and_mode "$TLS_DIR/origin.pem" "root:root 644"
   check_file_owner_and_mode "$TLS_DIR/origin.key" "root:root 600"
   check_env_file
