@@ -142,6 +142,7 @@ The booking, database plugin, auth, rate-limit, provider, catalog and bookings r
   - [0014 Scheduling model](docs/decisions/0014-scheduling-model.md)
   - [0015 nginx connection reuse and connection limits](docs/decisions/0015-nginx-connection-reuse-and-limits.md)
   - [0016 Application node provisioning](docs/decisions/0016-application-node-provisioning.md)
+  - [0017 Network load balancer in front of the application nodes](docs/decisions/0017-network-load-balancer.md)
 
 ## License
 

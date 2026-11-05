@@ -25,3 +25,4 @@ See [Deployment](../deployment.md#provisioning-an-application-node).
 - `/healthz` does not query Postgres, so a passing run does not show that the node reaches the database.
 - The parsing and rule list are repeated in `verify.sh`, so that each script stands alone.
 - The script does not create the VM, join it to the `app-nodes` network security group, or change DNS or Cloudflare.
+- The original application host ([Deployment](../deployment.md#hosts)) is hand-built. The script refuses to run there, because that host's `.env` defines `MIGRATE_DATABASE_URL`. That host holds the extra 443 sources file only so that `verify.sh` accounts for the load balancer's probe rule ([ADR 0017](0017-network-load-balancer.md)). Only the script builds rules from that file, so the file does not build that host's rule.

@@ -20,3 +20,7 @@ Replace the open `ACCEPT` rules for ports 80 and 443 with 15 plain iptables rule
 - The rules cover IPv4 only.
 - Port 22 has no source restriction in the host rules.
 - The drift check in [Deployment](../deployment.md#firewall-verification) compares the firewall rules with Cloudflare's list and does not cover `deploy/nginx/cloudflare-real-ip.conf`.
+
+## Amendment, 2026-11-04
+
+The decision above stands, with one addition. Since the network load balancer ([ADR 0017](0017-network-load-balancer.md)), port 443 on each host firewall admits Cloudflare's ranges, plus the load balancer's private address for probes only. Client traffic keeps its Cloudflare source address through the load balancer, so it still matches the Cloudflare range rules.

@@ -2,20 +2,26 @@
 
 Runbook for production. Commands that start with `cd /opt/chambalink` or use `docker compose` run in the clone on the host that the section names; on the application host they run as the `ubuntu` user unless they use `sudo`. Where a section still says "the VM", it means the application host. Commands marked as run from outside the VM or the application host run on any other machine.
 
-Production is two hosts: the application host runs nginx and the `api` container, and the database host runs Postgres. See [Hosts](#hosts) and [ADR 0012](decisions/0012-dedicated-database-host.md). A systemd timer on the database host backs up the database to Object Storage every six hours; see [Backups](#backups). The host firewall rules restrict port 443 to Cloudflare's IPv4 ranges; [`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh) builds them on a provisioned node. The network security groups that restrict port 5432 exist only in OCI and are not in the repository.
+Production is three hosts: the original application host and the second application node run nginx and the `api` container behind the network load balancer, and the database host runs Postgres. See [Hosts](#hosts), [ADR 0012](decisions/0012-dedicated-database-host.md) and [ADR 0017](decisions/0017-network-load-balancer.md). A systemd timer on the database host backs up the database to Object Storage every six hours; see [Backups](#backups). The host firewall rules restrict port 443 to Cloudflare's IPv4 ranges, plus the load balancer's private address for probes only, and client traffic keeps its Cloudflare source address; [`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh) builds them on a provisioned node. The network security groups that restrict port 5432 exist only in OCI and are not in the repository.
 
 ## Hosts
 
-Both hosts are Oracle Cloud Infrastructure Always Free VMs.
+All three hosts are Oracle Cloud Infrastructure Always Free VMs:
 
-| Item | Application host | Database host |
-| --- | --- | --- |
-| Shape | VM.Standard.A1.Flex (Ampere A1, arm64), 1 OCPU, 6 GB RAM | VM.Standard.E2.1.Micro (x86_64) |
-| Runs | nginx on the host; the `api` container | The `db` container |
-| Compose files | `compose.prod.yaml`, `deploy/app/compose.yaml` and `deploy/app/migrate.yaml` | `deploy/db/compose.yaml` |
-| Network security group | `app-nodes` | `db-host` |
+- The original application host, hostname `chambalink`, is hand-built.
+- The second application node, hostname `instancia-web`, is provisioned by [`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh).
+- The database host runs Postgres.
 
-Application host:
+In this document, "the application host" on its own means the original application host.
+
+| Item | Original application host | Second application node | Database host |
+| --- | --- | --- | --- |
+| Shape | VM.Standard.A1.Flex (Ampere A1, arm64), 1 OCPU, 6 GB RAM | VM.Standard.A1.Flex (Ampere A1, arm64), 1 OCPU | VM.Standard.E2.1.Micro (x86_64) |
+| Runs | nginx on the host; the `api` container | nginx on the host; the `api` container | The `db` container |
+| Compose files | `compose.prod.yaml`, `deploy/app/compose.yaml` and `deploy/app/migrate.yaml` | `compose.prod.yaml` and `deploy/app/compose.yaml` | `deploy/db/compose.yaml` |
+| Network security group | `app-nodes` | `app-nodes` | `db-host` |
+
+Original application host:
 
 | Item | Value |
 | --- | --- |
@@ -29,7 +35,7 @@ Application host:
 
 | Network security group | Holds | Rules |
 | --- | --- | --- |
-| `app-nodes` | The application host's VNIC | None of its own |
+| `app-nodes` | The VNICs of the original application host and the second application node | None of its own |
 | `db-host` | The database host's VNIC | One ingress rule: TCP 5432 from `app-nodes` |
 
 The subnet's security list has no rule for TCP 5432. Port 5432 is published only on the database host's private address (`DB_BIND_ADDR`). Docker-published ports bypass the host's iptables `INPUT` rules, so access to Postgres is gated by the bind address, the network security groups and the Postgres password. Traffic on port 5432 is not encrypted with TLS.
@@ -89,7 +95,7 @@ Expected output: `600 ubuntu`.
 | --- | --- |
 | Domain | `chambalink.online`, registered at GoDaddy |
 | DNS | Cloudflare, Free plan |
-| Apex | `A` record to the application host, proxied |
+| Apex | `A` record to the network load balancer, proxied |
 | `www` | `CNAME` to the apex, proxied |
 
 Because both records are proxied, public DNS returns Cloudflare addresses, not the VM's address.
@@ -115,7 +121,7 @@ The origin certificate:
 
 - covers `chambalink.online` and a wildcard, and expires on Oct 18 2041;
 - uses an RSA 2048 key generated on the application host with `openssl`; only the CSR was submitted to Cloudflare. The private key is on the application host and, root-only under `/etc/chambalink/secrets/` and `/etc/ssl/chambalink/`, on each node provisioned with [`ops/node/bootstrap.sh`](../ops/node/bootstrap.sh);
-- is trusted only by Cloudflare, so a client that reaches the origin directly gets an untrusted-certificate error unless it trusts Cloudflare Origin CA. From outside the application host, only Cloudflare's IPv4 ranges can reach port 443; see [Firewall](#firewall).
+- is trusted only by Cloudflare, so a client that reaches the origin directly gets an untrusted-certificate error unless it trusts Cloudflare Origin CA. From outside the application host, only Cloudflare's IPv4 ranges can reach port 443, plus the load balancer's private address for probes only; client traffic keeps its Cloudflare source address. See [Firewall](#firewall).
 
 Cloudflare sends no expiry notifications for Origin CA certificates. No renewal is configured on the application host. See [ADR 0006](decisions/0006-cloudflare-origin-ca-certificate.md).
 
@@ -176,26 +182,56 @@ docker compose up -d --wait
 
 ## Updating the running version
 
-This sequence runs on the application host. It has been executed once, when `db` and `api` ran on one host and the migrator ran as `docker compose run --rm --no-deps api node dist/migrate.js`. Set `RELEASE_SHA` as above.
+Roll one application host at a time. Finish one host, check that the load balancer's backend-set health is OK, and only then start the other host. Check it again after the second roll. The hosts are described in [Hosts](#hosts). The steps below were run on 2026-11-04, except the `migrate` line, which comes from the earlier sequence on one host.
+
+### Second application node
+
+The second application node is updated by the bootstrap. Run these in its clone:
+
+```bash
+git pull --ff-only
+RELEASE_SHA="$(git rev-parse HEAD)"
+docker manifest inspect "ghcr.io/henriquezsergio728-tech/chamba-link-api:${RELEASE_SHA}" > /dev/null && echo found
+sudo API_TAG="${RELEASE_SHA}" REPO_REF=main bash ops/node/bootstrap.sh
+sudo bash ops/node/verify.sh
+```
+
+Expected: `found`, and no `FAIL` line from `verify.sh`.
+
+### Original application host
+
+The original application host is hand-built and the bootstrap refuses it, so it is updated by hand. Set `RELEASE_SHA` to the value used on the second application node.
 
 ```bash
 RELEASE_SHA=<full 40-character commit SHA>
 cd /opt/chambalink
 git pull --ff-only
+cp -a .env .env.bak
 sed -i "s/^API_TAG=.*/API_TAG=${RELEASE_SHA}/" .env
 grep '^API_TAG=' .env
 docker compose pull
 docker compose run --rm migrate
 docker compose up -d --wait
+docker inspect --format '{{.Config.Image}}' "$(docker compose ps -q api)"
+rm .env.bak
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-When it was executed, `docker compose pull` also fetched a newer `postgres:16` image, because `compose.yaml` referenced the tag `postgres:16` rather than a digest at the time. `docker compose up -d` then recreated the `db` container. The `pgdata` volume was kept. `docker volume inspect` and `docker inspect` on the VM showed that the volume was created about two days before the recreated `db` container, so it was not recreated.
+Expected: the image printed by `docker inspect` ends in `:` and the value of `RELEASE_SHA`, and `nginx -t` reports `syntax is ok` and `test is successful`. `cp -a` keeps the mode of `.env` on the backup. The reload is there because the site config is a symlink into the clone, so `git pull --ff-only` can change it.
+
+### Migrations
+
+Migrations run only on the host whose `.env` holds the owner URL, `MIGRATE_DATABASE_URL`, which is the original application host. The second application node has no `migrate` service.
+
+### Notes
+
+When the earlier sequence ran on one host, `docker compose pull` also fetched a newer `postgres:16` image, because `compose.yaml` referenced the tag `postgres:16` rather than a digest at the time. `docker compose up -d` then recreated the `db` container. The `pgdata` volume was kept. `docker volume inspect` and `docker inspect` on the VM showed that the volume was created about two days before the recreated `db` container, so it was not recreated.
 
 `compose.yaml` now pins the `db` image to a `postgres:16` digest. The digest is the OCI image index of the `postgres:16` image running in production (PostgreSQL 16.15) and covers `linux/amd64` and `linux/arm64/v8`. `docker compose pull` no longer changes the Postgres build; changing it means changing the digest in `compose.yaml`, `deploy/db/compose.yaml` and `.github/workflows/ci.yml` in a pull request.
 
-`git pull --ff-only` updates the Compose files and the nginx config in the working copy. nginx reads a changed config only after a reload; see [nginx](#nginx).
+`git pull --ff-only` updates the Compose files and the nginx config in the working copy. nginx reads a changed config only after a reload; see [nginx](#nginx). The bootstrap reloads nginx only when the symlink, the TLS files or the two limits change, so on the second application node it does not reload for a change to the site config alone.
 
-With the application host's `COMPOSE_FILE`, `docker compose pull` fetches only the API image, and `docker compose run --rm migrate` runs the migrator against the database host as the owner, through `MIGRATE_DATABASE_URL`.
+With the original application host's `COMPOSE_FILE`, `docker compose pull` fetches only the API image, and `docker compose run --rm migrate` runs the migrator against the database host as the owner, through `MIGRATE_DATABASE_URL`.
 
 `API_TAG` pins the API image to one commit SHA. No rollback has been exercised.
 
@@ -349,7 +385,7 @@ The rules on the application host were applied by hand, as described below. [`op
 
 ### Applied rules
 
-The IPv4 `INPUT` chain on the application host, in order:
+The IPv4 `INPUT` chain on both application hosts, in order:
 
 | # | Rule |
 | --- | --- |
@@ -357,8 +393,9 @@ The IPv4 `INPUT` chain on the application host, in order:
 | 2 | `ACCEPT` ICMP |
 | 3 | `ACCEPT` on `lo` |
 | 4 | `ACCEPT` TCP 22, state `NEW`, no source restriction |
-| 5-19 | `ACCEPT` TCP 443, state `NEW`, one rule per Cloudflare IPv4 range (`-s <range>`), 15 rules |
-| 20 | `REJECT` with `icmp-host-prohibited` |
+| 5 | `ACCEPT` TCP 443, state `NEW`, from the load balancer's private address, for probes only; client traffic keeps its Cloudflare source address and matches rules 6-20 |
+| 6-20 | `ACCEPT` TCP 443, state `NEW`, one rule per Cloudflare IPv4 range (`-s <range>`), 15 rules |
+| 21 | `REJECT` with `icmp-host-prohibited` |
 
 - There is no `ACCEPT` rule for port 80. nginx still listens on 80, and `curl -si http://127.0.0.1/healthz` on the application host returns `HTTP/1.1 200 OK`, but port 80 is unreachable from outside the application host.
 - The 15 ranges were copied from `https://www.cloudflare.com/ips-v4` on 2026-10-22 (UTC).
@@ -414,7 +451,7 @@ sudo iptables -S INPUT | grep -c "dport 443"
 sudo iptables -S INPUT | grep -c "dport 80"
 ```
 
-Expected: the order in [Applied rules](#applied-rules), then `15` and `0`.
+Expected: the order in [Applied rules](#applied-rules), then `16` and `0`.
 
 On the application host, compare the 443 rules with Cloudflare's current list:
 
@@ -422,7 +459,7 @@ On the application host, compare the 443 rules with Cloudflare's current list:
 diff <(curl -fsS https://www.cloudflare.com/ips-v4 | sort) <(sudo iptables -S INPUT | sed -n 's/^-A INPUT -s \([^ ]*\) .*--dport 443.*/\1/p' | sort) && echo in-sync
 ```
 
-Expected: `in-sync`. This check compares the firewall rules only, not `deploy/nginx/cloudflare-real-ip.conf`.
+Expected: one added line (`>`) for the load balancer's private address and no removed line (`<`). `in-sync` is not printed, because that address is not on Cloudflare's list. This check compares the firewall rules only, not `deploy/nginx/cloudflare-real-ip.conf`.
 
 On the application host, packet counters on the Cloudflare range rules:
 
@@ -455,6 +492,8 @@ After a reboot, the chain had 15 rules matching `dport 443` and 0 matching `dpor
 
 - Any request to the application host's address on port 80.
 - Any request to the application host's address on port 443 from an address outside Cloudflare's ranges, including `curl --cacert ... --resolve chambalink.online:443:<application host address>`. Run the origin certificate check on the application host against `127.0.0.1`, as in [TLS](#tls).
+
+The exception is the load balancer's private address, which the host firewall admits for probes only.
 
 The checks on the application host against `127.0.0.1` and the checks through `chambalink.online` are unaffected.
 
@@ -515,6 +554,8 @@ The script checks the file before it changes anything, and exits 1 with a list o
 
 The rules follow the file at each run of the script, so a change takes a new run. A run without the file removes the rules and saves the result.
 
+The original application host is hand-built, and the script refuses to run there; see [Commands](#commands). That host holds this file only so that `verify.sh` accounts for the load balancer's probe rule. Only the script builds rules from the file, so the file does not build that host's rule.
+
 ### Commands
 
 On the new node, fetch the script and run it, with `<sha>` replaced by the image's commit SHA. `sudo` drops the caller's environment, so the variables go after it:
@@ -527,7 +568,7 @@ rm -rf /tmp/chambalink-bootstrap
 
 The script prints one line per step and ends with the status of `/healthz` on loopback, from the API on port 3000 and over `https` through nginx. On a failure it prints the failing line and exits non-zero. A second run with the same inputs changes nothing.
 
-It refuses a host whose `.env` defines `MIGRATE_DATABASE_URL`, because it writes `.env` without that variable.
+It refuses a host whose `.env` defines `MIGRATE_DATABASE_URL`, because it writes `.env` without that variable. The original application host is such a host, so the script refuses to run there.
 
 In order, it:
 
