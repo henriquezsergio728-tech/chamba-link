@@ -13,8 +13,9 @@ flowchart LR
     image -->|push to main only| ghcr[GHCR: chamba-link-api]
     ghcr -->|docker compose pull| apphost
     client[Client] -->|HTTPS, IPv4 or IPv6| cf[Cloudflare proxy]
-    cf -->|HTTPS :443, IPv4| nginx
-    subgraph apphost[Application host, arm64]
+    cf -->|HTTPS :443, IPv4| nlb[Network load balancer, TCP :443 passthrough]
+    nlb -->|both application nodes, 5-tuple hash| nginx
+    subgraph apphost[Two application nodes, arm64, each with]
         nginx[nginx :80 / :443] --> api[api container :3000]
         nginx --> files[Landing page files in the clone]
     end
@@ -31,11 +32,12 @@ flowchart LR
 | Migrator | `api/src/migrate.ts` | Ships in the API image as `dist/migrate.js`. In production it runs as the `migrate` service in `deploy/app/migrate.yaml`, connected as the table owner; the API connects as `chambalink_app`. See [ADR 0013](decisions/0013-least-privilege-database-role.md). |
 | Database | `deploy/db/compose.yaml` in production, `compose.yaml` locally | `postgres:16` pinned to a digest, with the named volume `pgdata`. In production, started with `max_connections=50`, `shared_buffers=128MB` and `effective_cache_size=384MB`. |
 | Edge proxy | Cloudflare (Free plan) | DNS for `chambalink.online`; proxies the apex and `www`. Configured in the Cloudflare dashboard, not in the repo. |
+| Load balancer | OCI network load balancer | TCP 443 passthrough to nginx on both application nodes. Configured in OCI, not in the repo. See [ADR 0017](decisions/0017-network-load-balancer.md). |
 | Reverse proxy | `deploy/nginx/chambalink.conf`, `deploy/nginx/cloudflare-real-ip.conf` | nginx installed on the host, not in a container. Terminates TLS and serves the landing page from `web/`. |
 | CI pipeline | `.github/workflows/ci.yml` | Jobs `test` and `image`. See [CI/CD](ci-cd.md). |
 | Registry | `ghcr.io/henriquezsergio728-tech/chamba-link-api` | Public, `linux/arm64` only. |
 
-Production is two hosts. The application host, an arm64 VM.Standard.A1.Flex, runs nginx on the host and only the `api` container, from `compose.prod.yaml` with `deploy/app/compose.yaml`, with `DATABASE_URL` pointing at the database host. The database host, an x86_64 VM.Standard.E2.1.Micro, runs `deploy/db/compose.yaml`, which runs only Postgres and publishes 5432 on the host's private address (`DB_BIND_ADDR`). The domain `chambalink.online` is registered at GoDaddy, with DNS hosted on Cloudflare. See [Deployment](deployment.md#hosts) and [ADR 0012](decisions/0012-dedicated-database-host.md).
+Production is three hosts: the original application host and the second application node, both behind the network load balancer, and the database host. The original application host and the second application node, each an arm64 VM.Standard.A1.Flex, run nginx on the host and only the `api` container, from `compose.prod.yaml` with `deploy/app/compose.yaml`, with `DATABASE_URL` pointing at the database host. The database host, an x86_64 VM.Standard.E2.1.Micro, runs `deploy/db/compose.yaml`, which runs only Postgres and publishes 5432 on the host's private address (`DB_BIND_ADDR`). The domain `chambalink.online` is registered at GoDaddy, with DNS hosted on Cloudflare. See [Deployment](deployment.md#hosts) and [ADR 0012](decisions/0012-dedicated-database-host.md).
 
 `compose.yaml` with `compose.prod.yaml` also runs `db` and `api` together on one host, where the API reaches Postgres at `db:5432`. Production does not use that combination.
 
@@ -43,7 +45,7 @@ Production is two hosts. The application host, an arm64 VM.Standard.A1.Flex, run
 
 1. A client resolves `chambalink.online` or `www.chambalink.online` to Cloudflare addresses. `www` is a CNAME to the apex, and both records are proxied.
 2. Cloudflare terminates the client's TLS connection. With Always Use HTTPS on, Cloudflare answers plain HTTP requests with a `301` redirect to HTTPS.
-3. Cloudflare connects to the application host on port 443 over IPv4 and validates the origin certificate (SSL/TLS mode Full (strict)).
+3. Cloudflare connects to the network load balancer on port 443 over IPv4. The load balancer passes the TCP connection through to nginx on one of the two application nodes, chosen by a hash of the 5-tuple. It does not terminate TLS or add a proxy protocol header, and it preserves the source address, so nginx sees the Cloudflare edge address. Cloudflare validates the origin certificate that nginx presents (SSL/TLS mode Full (strict)). See [ADR 0017](decisions/0017-network-load-balancer.md).
 4. nginx terminates TLS with a Cloudflare Origin CA certificate. For peers in Cloudflare's published ranges it replaces `$remote_addr` with the `CF-Connecting-IP` header (`deploy/nginx/cloudflare-real-ip.conf`).
 5. For `/`, `/landing.css`, `/styles/tokens.css` and `/brand/*.svg`, nginx serves files from `web/` in the clone; see [nginx](#nginx). It proxies every other request to the upstream `chambalink_api`, `127.0.0.1:3000`, over HTTP/1.1, reusing an idle connection from the keepalive cache when one is available, with the `Host`, `X-Real-IP`, `X-Forwarded-For` and `X-Forwarded-Proto` headers set and an empty `Connection` header.
 6. Docker forwards `127.0.0.1:3000` to port 3000 of the `api` container, where Fastify listens on `0.0.0.0`. Fastify takes `request.ip` from `X-Forwarded-For` because its peer is in a loopback or private range (`trustProxy: "loopback,uniquelocal"`).
@@ -73,22 +75,23 @@ After the `upstream` block, the file includes `/opt/chambalink/deploy/nginx/clou
 | Boundary | What is trusted | Mechanism |
 | --- | --- | --- |
 | Client to Cloudflare | Cloudflare's edge certificate | Managed by Cloudflare |
-| Network to origin | TCP 443 only from Cloudflare's IPv4 ranges; port 80 not reachable from outside | Host iptables `INPUT` rules on the application host; `ops/node/bootstrap.sh` builds them on a provisioned node. See [Deployment](deployment.md#firewall). |
+| Network to origin | TCP 443 from Cloudflare's IPv4 ranges, plus the load balancer's private address for probes only; client traffic keeps its Cloudflare source address; port 80 not reachable from outside | Host iptables `INPUT` rules on the application host; `ops/node/bootstrap.sh` builds them on a provisioned node. See [Deployment](deployment.md#firewall). |
 | Cloudflare to nginx | The origin presents a certificate signed by Cloudflare Origin CA | SSL/TLS mode Full (strict) |
 | nginx visitor address | `CF-Connecting-IP`, only when the peer is in Cloudflare's ranges | `ngx_http_realip_module` with `cloudflare-real-ip.conf` |
 | Fastify client address | `X-Forwarded-For`, only when the peer is loopback or private | `trustProxy: "loopback,uniquelocal"` in `api/src/app.ts` |
 | Host to containers | Port `3000` bound to `127.0.0.1` on the application host | `compose.prod.yaml` |
 | Application host to Postgres | TCP 5432 only from the `app-nodes` network security group, on the database host's private address, with the Postgres password; not TLS-encrypted | `DB_BIND_ADDR` in `deploy/db/compose.yaml`; network security groups in OCI, not in the repo. See [Deployment](deployment.md#private-network-access). |
 
-The host firewall on the application host accepts new TCP connections on 443 only from the 15 Cloudflare IPv4 ranges copied on 2026-10-22, and rejects them on 80 from outside the application host. It accepts port 22 from any address. A connection to 443 on the application host itself receives a certificate that only Cloudflare trusts.
+The host firewall on each application node accepts new TCP connections on 443 from the 15 Cloudflare IPv4 ranges copied on 2026-10-22, plus the load balancer's private address for probes only, and rejects them on 80 from outside the node. Client traffic keeps its Cloudflare source address through the load balancer, so it matches the Cloudflare range rules. The network security group allows 443 from anywhere to the load balancer, so the host firewall is what refuses other clients. It accepts port 22 from any address. A connection to 443 on the application host itself receives a certificate that only Cloudflare trusts.
 
 ## Network exposure
 
 | Host | Port | Bound to | Process |
 | --- | --- | --- | --- |
+| Load balancer | 443 | the network load balancer; the network security group allows any source | TCP passthrough to nginx on both application nodes |
 | Application | 22 | not defined in the repo | SSH; the host firewall accepts it from any address |
 | Application | 80 | all interfaces (IPv4 and IPv6); reachable on loopback only | nginx on the host, plain HTTP |
-| Application | 443 | all interfaces (IPv4 and IPv6); reachable from outside only from Cloudflare's IPv4 ranges | nginx on the host, TLS |
+| Application | 443 | all interfaces (IPv4 and IPv6); reachable from outside from Cloudflare's IPv4 ranges, plus the load balancer's private address for probes only | nginx on the host, TLS |
 | Application | 3000 | `127.0.0.1` | `api` container (`compose.prod.yaml`) |
 | Database | 5432 | the host's private address (`DB_BIND_ADDR`); reachable only from the `app-nodes` network security group | `db` container (`deploy/db/compose.yaml`) |
 
