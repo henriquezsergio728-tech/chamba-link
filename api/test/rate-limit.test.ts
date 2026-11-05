@@ -18,7 +18,7 @@ const newKey = () => {
 };
 
 // 2026-11-02 09:00:00 UTC is a multiple of 900 s, so it starts a 15-minute window.
-const WINDOW_START = new Date("2026-11-02T09:00:00Z");
+const WINDOW_START = new Date(process.env.RL_WINDOW_START ?? "2026-11-02T09:00:00Z"); // TEMP-DEBUG
 const at = (seconds: number) => new Date(WINDOW_START.getTime() + seconds * 1000);
 const rule: Rule = { limit: 3, windowSeconds: 900 };
 
@@ -73,6 +73,7 @@ test("keys are independent", async () => {
 test("20 concurrent calls on one key with limit 5 allow exactly 5", async () => {
   const key = newKey();
   const results = await Promise.all(Array.from({ length: 20 }, () => consume(db, key, { limit: 5, windowSeconds: 900 }, at(10))));
+  if (process.env.RL_DEBUG && results.filter((r) => r.allowed).length !== 5) (await import("node:fs")).appendFileSync(process.env.RL_DEBUG, JSON.stringify({ key, when: new Date().toISOString(), counts: results.map((r) => r.count).sort((x, y) => x - y), allowed: results.filter((r) => r.allowed).map((r) => [r.count, r.windowStart]) }) + "\n"); // TEMP-DEBUG
   expect(results.filter((r) => r.allowed)).toHaveLength(5);
   expect(results.map((r) => r.count).sort((x, y) => x - y)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
 });
