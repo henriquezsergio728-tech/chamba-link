@@ -606,6 +606,132 @@ sudo bash /opt/chambalink/ops/node/verify.sh
 - It does not pin the Docker or nginx package versions. It installs what the repositories offer, and leaves installed packages as they are.
 - It does not remove `/etc/chambalink/secrets/` after it finishes.
 
+## Standby activation controller
+
+[`ops/controller/controller.py`](../ops/controller/controller.py) runs on the original application host. While this host's CPU stays high it clears the second application node's backup flag on the network load balancer, so both nodes share traffic. While CPU stays low it sets the flag again. This is activation of a standby, not instance-pool autoscaling: Always Free caps A1 at two instances, and the controller creates no instance. See [ADR 0018](decisions/0018-standby-activation-autoscaling.md).
+
+The commands in this section have not been run on a host.
+
+### Controller prerequisites
+
+These are configured in OCI and are not in the repository:
+
+- A dynamic group that matches the original application host.
+- A narrow policy that lets that dynamic group read the network load balancer's backend, backend health and work requests, and update the backend.
+
+The backend set's `are_operationally_active_backends_preferred` must be off. With it on, the SDK documents a standby that keeps serving after it has taken over, even when the old active backend is healthy again.
+
+The controller authenticates with instance principals, so it uses no API key and no secret on disk.
+
+### Controller installation
+
+On the original application host, as the `ubuntu` user. The virtual environment is outside the clone, so `git pull --ff-only` does not touch it:
+
+```bash
+sudo apt-get install -y python3-venv
+sudo python3 -m venv /opt/chambalink-controller
+sudo /opt/chambalink-controller/bin/pip install -r /opt/chambalink/ops/controller/requirements.txt
+```
+
+Create the configuration file and set the three required values:
+
+```bash
+sudo test -d /etc/chambalink || sudo install -d -o root -g root -m 700 /etc/chambalink
+sudo test -e /etc/chambalink/controller.env || sudo install -m 600 -o root -g root /opt/chambalink/ops/controller/controller.env.example /etc/chambalink/controller.env
+sudoedit /etc/chambalink/controller.env
+sudo stat -c '%a %U' /etc/chambalink/controller.env
+```
+
+Expected output of `stat`: `600 root`. A rerun keeps the existing file.
+
+### Controller configuration
+
+systemd loads `/etc/chambalink/controller.env`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CONTROLLER_NLB_ID` | Required | The network load balancer |
+| `CONTROLLER_BACKEND_SET` | Required | The backend set's name |
+| `CONTROLLER_BACKEND_NAME` | Required | The second application node's backend name |
+| `CONTROLLER_SAMPLE_SECONDS` | `5` | Time between CPU samples |
+| `CONTROLLER_SCALE_OUT_THRESHOLD` | `0.70` | Mean CPU at or above which the flag is cleared |
+| `CONTROLLER_SCALE_OUT_WINDOW_SECONDS` | `30` | Window of that mean |
+| `CONTROLLER_SCALE_IN_THRESHOLD` | `0.30` | Mean CPU at or below which the flag is set |
+| `CONTROLLER_SCALE_IN_WINDOW_SECONDS` | `300` | Window of that mean |
+| `CONTROLLER_COOLDOWN_SECONDS` | `120` | Time after a change during which no change is made |
+| `CONTROLLER_REFRESH_SECONDS` | `30` | Time between reads of the backend for the log |
+| `CONTROLLER_WORK_REQUEST_TIMEOUT_SECONDS` | `120` | Time allowed to confirm a change |
+| `CONTROLLER_WORK_REQUEST_POLL_SECONDS` | `5` | Time between polls while confirming |
+| `CONTROLLER_BACKOFF_BASE_SECONDS` | `5` | First delay after an API error; it doubles on each further error |
+| `CONTROLLER_BACKOFF_MAX_SECONDS` | `300` | Longest delay after an API error |
+| `CONTROLLER_PROFILE` | Empty | `demo` shortens the scale-in window to 60 s and changes nothing else |
+
+The controller exits with code 78 and names the variable when a value is invalid, and the unit does not restart after that code. It refuses a `CONTROLLER_SCALE_IN_THRESHOLD` that is not strictly below half of `CONTROLLER_SCALE_OUT_THRESHOLD`; see [ADR 0018](decisions/0018-standby-activation-autoscaling.md). Each window must be a whole multiple of `CONTROLLER_SAMPLE_SECONDS`. `CONTROLLER_PROFILE=demo` cannot be combined with `CONTROLLER_SCALE_IN_WINDOW_SECONDS`.
+
+### Checking the controller before enabling it
+
+Both checks run as a transient user with the service's environment file, so they exercise the instance principal from an unprivileged process. Neither changes the load balancer.
+
+Run `--once` first. It prints one log line with the CPU signal, the flag, the backend's health and the decision:
+
+```bash
+sudo systemd-run --wait --pipe --collect --property=DynamicUser=yes --property=EnvironmentFile=/etc/chambalink/controller.env /opt/chambalink-controller/bin/python /opt/chambalink/ops/controller/controller.py --once
+```
+
+Expected: `flag` is `true` or `false`, `backend_health` is set, `decision` is `none` with `reason` `partial_window`, and `error` is `null`. The exit code is `1` if the CPU or the backend could not be read.
+
+Run `--dry-run` second. It loops, decides and logs, and never calls update. This command stops it after 360 s, one full scale-in window and a margin:
+
+```bash
+sudo systemd-run --wait --pipe --collect --property=DynamicUser=yes --property=EnvironmentFile=/etc/chambalink/controller.env /usr/bin/timeout 360 /opt/chambalink-controller/bin/python /opt/chambalink/ops/controller/controller.py --dry-run
+```
+
+Expected: one line per tick, with `api_result` `dry_run` or `noop` on a tick that decides `scale_out` or `scale_in`. A dry run does not clear its windows or start the cooldown, so a decision repeats on every tick while the load holds. `timeout` makes the command itself end with code 124.
+
+### Enabling the controller
+
+```bash
+sudo systemctl link /opt/chambalink/ops/controller/chambalink-controller.service
+sudo systemctl enable --now chambalink-controller.service
+systemctl status chambalink-controller.service
+```
+
+The unit is a symlink into the clone, and the running process keeps the code it started with. After a pull that changes `ops/controller/`:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart chambalink-controller.service
+```
+
+Stopping the unit leaves the flag as it is. To change the flag by hand, stop the unit first.
+
+### Controller logs
+
+```bash
+sudo journalctl -u chambalink-controller.service -o cat
+```
+
+Each tick writes one JSON line to stdout. A startup refusal is plain text on stderr. Every line has every field, with `null` where a value does not apply:
+
+| Field | Meaning |
+| --- | --- |
+| `time` | UTC time of the tick |
+| `mode` | `run`, `dry_run` or `once` |
+| `cpu` | Utilization from this tick's `/proc/stat` delta, from 0 to 1 |
+| `scale_out_mean`, `scale_in_mean` | Mean of the samples in each window, including a window that is not full |
+| `scale_out_window_full`, `scale_in_window_full` | Whether each window holds a full set of samples taken after the last change |
+| `flag` | Last value of `is_backup` that was read or confirmed |
+| `backend_health` | The backend's health status, on a tick that read it |
+| `decision` | `none`, `scale_out` or `scale_in` |
+| `reason` | `no_baseline`, `metric_error`, `cooldown`, `partial_window`, `within_thresholds`, `scale_out_threshold`, `scale_in_threshold` or `flag_changed` |
+| `api_result` | `read`, `noop`, `dry_run`, `updated`, `failed`, `timeout`, `interrupted`, `error` or `backoff` |
+| `work_request_result` | The work request's last status, on a tick that called update |
+| `error` | Error type, HTTP status and service code, or the metric error |
+
+`flag_changed` means that a read found a different flag from the last one known, as when an update lands after its timeout or an operator changes the flag. The controller treats it as a change: it clears the windows and starts the cooldown.
+
+The log holds no API message and no work request id, so it holds no OCID.
+
 ## Backups
 
 Backups run on the database host. The application host has no backup timer.
