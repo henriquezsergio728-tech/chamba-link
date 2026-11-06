@@ -15,7 +15,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 - A database-level guarantee that a provider cannot hold two overlapping pending, confirmed or completed bookings, covered by integration tests, with lapsed holds expired in the transaction that inserts the next booking.
 - A container image for the API that also ships a programmatic migrator.
 - A GitHub Actions pipeline that typechecks, migrates and tests on every pull request, builds an arm64 image, runs its migrator against a fresh Postgres, smoke-tests it, and publishes it to GitHub Container Registry from `main`.
-- Compose files for a two-host production setup, an application host that runs the API and a database host that runs Postgres on its private address, and an nginx config on the application host that serves `chambalink.online` and `www.chambalink.online` behind the Cloudflare proxy, terminates TLS with a Cloudflare Origin CA certificate, and restores visitor addresses from `CF-Connecting-IP`.
+- Compose files for a three-host production setup, two application nodes that run the API behind a network load balancer and a database host that runs Postgres on its private address, and an nginx config on each application node that serves `chambalink.online` and `www.chambalink.online` behind the Cloudflare proxy, terminates TLS with a Cloudflare Origin CA certificate, and restores visitor addresses from `CF-Connecting-IP`.
 - Client addresses taken from `X-Forwarded-For` when the API's peer is a loopback or private-network proxy, covered by tests.
 
 ## Repository layout
@@ -45,7 +45,7 @@ ChambaLink is a scheduling and marketplace platform for informal-economy service
 │   ├── test/                 Vitest tests
 │   └── drizzle.config.ts     drizzle-kit configuration
 ├── deploy/
-│   ├── nginx/                nginx site config and Cloudflare real-IP ranges for the application host
+│   ├── nginx/                nginx site config and Cloudflare real-IP ranges for the application nodes
 │   ├── db/compose.yaml       Postgres-only Compose project for a database host
 │   ├── app/compose.yaml      Overlay that runs the API without a local database
 │   └── app/migrate.yaml      Overlay that adds the migrator service
