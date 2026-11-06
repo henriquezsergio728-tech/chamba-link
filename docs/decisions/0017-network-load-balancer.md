@@ -32,7 +32,7 @@ Since 2026-11-04 the domain's record points at an OCI network load balancer. Tra
 - The health check does not validate the Origin CA certificate, so a healthy status says nothing about the certificate that Cloudflare validates.
 - `/healthz` does not query Postgres, so a healthy status does not show that a node reaches the database.
 - Both application nodes are in the same availability domain, so one domain failure takes both. Always Free allows two A1 instances.
-- The load balancer closes TCP connections after 120 s idle. nginx's 30 s `keepalive_timeout` is set in the `chambalink_api` upstream, so it applies from nginx to the API and not to connections that cross the load balancer. The repository sets no `keepalive_timeout` for those connections.
+- The load balancer closes TCP connections after 120 s idle. nginx's 30 s `keepalive_timeout` is set in the `chambalink_api` upstream, so it applies from nginx to the API and not to connections that cross the load balancer. The repository sets no `keepalive_timeout` for those connections, and neither application node sets a client-facing one (item (e)), so nginx's default of 75 s applies. The 75 s is nginx's documented default, not a measured value. It is below the load balancer's 120 s TCP idle timeout, so nginx closes idle client connections before the load balancer does.
 - The load balancer hashes on the 5-tuple, so one client's connections can land on different nodes and the split need not be even. Sessions and rate-limit counters are in Postgres, so they do not depend on which node answers.
 - The load balancer, its health check and the network security group are configured in OCI and are not in the repository.
 
@@ -42,6 +42,7 @@ Since 2026-11-04 the domain's record points at an OCI network load balancer. Tra
 - (b) A direct request to the load balancer from a non-Cloudflare client was refused.
 - (c) 20 requests through the domain split 5 and 15 across the nodes.
 - (d) Established 443 peers were Cloudflare edge addresses.
+- (e) `nginx -T` on both application nodes shows `keepalive_timeout` only as the 30 s inside the `chambalink_api` upstream block, which is the upstream keepalive and not the client-facing one.
 
 ### Not tested
 

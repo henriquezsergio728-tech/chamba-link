@@ -98,7 +98,7 @@ Expected output: `600 ubuntu`.
 | Apex | `A` record to the network load balancer, proxied |
 | `www` | `CNAME` to the apex, proxied |
 
-Because both records are proxied, public DNS returns Cloudflare addresses, not the VM's address.
+Because both records are proxied through Cloudflare, public DNS returns Cloudflare addresses, not the network load balancer's address.
 
 Check from outside the VM:
 
@@ -182,7 +182,7 @@ docker compose up -d --wait
 
 ## Updating the running version
 
-Roll one application host at a time. Finish one host, check that the load balancer's backend-set health is OK, and only then start the other host. Check it again after the second roll. The hosts are described in [Hosts](#hosts). The steps below were run on 2026-11-04, except the `migrate` line, which comes from the earlier sequence on one host.
+Roll one application host at a time. Finish one host, check that the load balancer's backend-set health is OK, and only then start the other host. Check it again after the second roll. For a release that includes a database migration, the original application host goes first; see [Migrations](#migrations). The hosts are described in [Hosts](#hosts). The steps below were run on 2026-11-04, except the `migrate` line, which comes from the earlier sequence on one host, and the second application node's nginx reload and the original application host's `RELEASE_SHA` line, which were added after that run.
 
 ### Second application node
 
@@ -193,19 +193,20 @@ git pull --ff-only
 RELEASE_SHA="$(git rev-parse HEAD)"
 docker manifest inspect "ghcr.io/henriquezsergio728-tech/chamba-link-api:${RELEASE_SHA}" > /dev/null && echo found
 sudo API_TAG="${RELEASE_SHA}" REPO_REF=main bash ops/node/bootstrap.sh
+sudo nginx -t && sudo systemctl reload nginx
 sudo bash ops/node/verify.sh
 ```
 
-Expected: `found`, and no `FAIL` line from `verify.sh`.
+Expected: `found`, `nginx -t` reports `syntax is ok` and `test is successful`, and no `FAIL` line from `verify.sh`.
 
 ### Original application host
 
-The original application host is hand-built and the bootstrap refuses it, so it is updated by hand. Set `RELEASE_SHA` to the value used on the second application node.
+The original application host is hand-built and the bootstrap refuses it, so it is updated by hand. `RELEASE_SHA` is the commit that `git pull --ff-only` checked out.
 
 ```bash
-RELEASE_SHA=<full 40-character commit SHA>
 cd /opt/chambalink
 git pull --ff-only
+RELEASE_SHA="$(git rev-parse HEAD)"
 cp -a .env .env.bak
 sed -i "s/^API_TAG=.*/API_TAG=${RELEASE_SHA}/" .env
 grep '^API_TAG=' .env
@@ -223,13 +224,15 @@ Expected: the image printed by `docker inspect` ends in `:` and the value of `RE
 
 Migrations run only on the host whose `.env` holds the owner URL, `MIGRATE_DATABASE_URL`, which is the original application host. The second application node has no `migrate` service.
 
+For a release that includes a database migration, roll the original application host first, because its sequence runs the `migrate` service before it brings the API up, then roll the second application node. Ship only additive migrations, because the previous API version keeps serving during the roll.
+
 ### Notes
 
 When the earlier sequence ran on one host, `docker compose pull` also fetched a newer `postgres:16` image, because `compose.yaml` referenced the tag `postgres:16` rather than a digest at the time. `docker compose up -d` then recreated the `db` container. The `pgdata` volume was kept. `docker volume inspect` and `docker inspect` on the VM showed that the volume was created about two days before the recreated `db` container, so it was not recreated.
 
 `compose.yaml` now pins the `db` image to a `postgres:16` digest. The digest is the OCI image index of the `postgres:16` image running in production (PostgreSQL 16.15) and covers `linux/amd64` and `linux/arm64/v8`. `docker compose pull` no longer changes the Postgres build; changing it means changing the digest in `compose.yaml`, `deploy/db/compose.yaml` and `.github/workflows/ci.yml` in a pull request.
 
-`git pull --ff-only` updates the Compose files and the nginx config in the working copy. nginx reads a changed config only after a reload; see [nginx](#nginx). The bootstrap reloads nginx only when the symlink, the TLS files or the two limits change, so on the second application node it does not reload for a change to the site config alone.
+`git pull --ff-only` updates the Compose files and the nginx config in the working copy. nginx reads a changed config only after a reload; see [nginx](#nginx). The bootstrap reloads nginx only when the symlink, the TLS files or the two limits change, so on the second application node it does not reload for a change to the site config alone; the `nginx -t` and reload line in [Second application node](#second-application-node) covers that change.
 
 With the original application host's `COMPOSE_FILE`, `docker compose pull` fetches only the API image, and `docker compose run --rm migrate` runs the migrator against the database host as the owner, through `MIGRATE_DATABASE_URL`.
 
