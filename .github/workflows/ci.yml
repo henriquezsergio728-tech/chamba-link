@@ -81,3 +81,22 @@ jobs:
           docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
+
+  controller:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require Python 3.12
+        run: python3 -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
+      - name: Unit tests
+        run: python3 -m unittest discover -s ops/controller
+      - name: Install the pinned SDK
+        run: |
+          python3 -m venv "$RUNNER_TEMP/controller-venv"
+          "$RUNNER_TEMP/controller-venv/bin/pip" install -r ops/controller/requirements.txt
+      - name: Check that the SDK's UpdateBackendDetails has is_backup
+        run: |
+          "$RUNNER_TEMP/controller-venv/bin/python" - <<'PY'
+          from oci.network_load_balancer.models import UpdateBackendDetails
+          assert "is_backup" in UpdateBackendDetails().swagger_types
+          PY

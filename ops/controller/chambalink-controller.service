@@ -1,0 +1,28 @@
+[Unit]
+Description=ChambaLink standby activation controller
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# PID 1 reads this file as root, so it can stay root-only while the service runs unprivileged.
+EnvironmentFile=/etc/chambalink/controller.env
+ExecStart=/opt/chambalink-controller/bin/python /opt/chambalink/ops/controller/controller.py
+Restart=on-failure
+RestartSec=10
+# Exit 78 is a refused configuration. Restarting cannot fix it, so systemd leaves the unit failed.
+RestartPreventExitStatus=78
+# A transient user with no home directory. Instance principals need no key or file on disk.
+DynamicUser=yes
+NoNewPrivileges=yes
+# The whole file system is read-only for the service, which writes only to stdout.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Ten times the default CPU weight, so the controller still gets CPU when the host is saturated.
+CPUWeight=1000
+# The kernel prefers other processes as OOM victims, so the controller survives memory pressure.
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target
