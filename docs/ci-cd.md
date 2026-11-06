@@ -61,6 +61,20 @@ The migrate step tests the migrator inside the built image:
 
 The smoke test runs the image with port `127.0.0.1:3000:3000` and polls `GET /healthz` with `curl -fsS`, retrying up to 20 times at 1 s intervals on any error, including connection refused and connection reset. On failure it prints `docker ps -a` and the container logs, then fails the job. The container runs with `DATABASE_URL=postgres://smoke:smoke@127.0.0.1:5432/smoke`, which points at no database. The API exits at startup without a valid `DATABASE_URL`, but its connection pool connects only when a query runs and `GET /healthz` runs none, so the smoke test needs no Postgres.
 
+## Job `controller`
+
+Runs on `ubuntu-24.04`, with no `needs` in either direction, so it does not wait for `test` or `image` and they do not wait for it. It uses the runner's `python3`.
+
+Steps:
+
+1. `actions/checkout@v7`
+2. Asserts that `python3` is version 3.12.
+3. `python3 -m unittest discover -s ops/controller`, which needs no SDK and no network.
+4. Creates a virtual environment at `$RUNNER_TEMP/controller-venv` and installs `ops/controller/requirements.txt`, the pinned OCI SDK.
+5. Asserts, with a short script run in that environment, that the SDK's `UpdateBackendDetails` has `is_backup`.
+
+`controller` is not a required check: the ruleset requires only `test` and `image` ([Branch protection](#branch-protection)), so its result does not block a merge.
+
 ## Image
 
 The [`Dockerfile`](../Dockerfile) has two stages, both `node:24-slim`:
